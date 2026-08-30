@@ -439,7 +439,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 </div></div>{% endif %}
 <footer>本結果は公開GISデータを利用した参考情報です。「該当データなし」は安全を保証するものではありません。<br>コンビニ・スーパー・駅：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN</footer>
 </main>
-<script>document.getElementById('searchForm').addEventListener('submit',function(){this.classList.add('loading');this.querySelector('.btn').disabled=true;});</script>
+<script>document.getElementById('searchForm').addEventListener('submit',function(){this.classList.add('loading');const b=this.querySelector('.btn');b.disabled=true;b.textContent='🔍 調査中です…しばらくお待ちください';});</script>
 </body></html>'''
 
 @app.route("/")
