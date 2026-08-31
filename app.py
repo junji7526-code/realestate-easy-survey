@@ -125,8 +125,40 @@ def normalize_japanese_address_for_school(address):
 
 def get_school_district_fallback(address):
     s=normalize_japanese_address_for_school(address)
+
+    # 岐阜市：公式の通学区域規則に基づく補完（段階整備）
+    # 茜部小学校区は、岐阜市例規集「別表第1」で次の区域とされています。
+    # 中学校は「別表第2」により、茜部小学校区の全域が加納中学校区です。
+    if "岐阜市" in s:
+        akanabe_areas = [
+            "茜部大野1丁目", "茜部大野2丁目",
+            "茜部大川1丁目", "茜部大川2丁目",
+            "茜部新所1丁目", "茜部新所2丁目", "茜部新所3丁目", "茜部新所4丁目",
+            "茜部神清寺1丁目", "茜部神清寺2丁目",
+            "茜部寺屋敷1丁目", "茜部寺屋敷2丁目", "茜部寺屋敷3丁目",
+            "茜部中島1丁目", "茜部中島2丁目", "茜部中島3丁目",
+            "茜部野瀬1丁目", "茜部野瀬2丁目", "茜部野瀬3丁目",
+            "茜部菱野1丁目", "茜部菱野2丁目", "茜部菱野3丁目", "茜部菱野4丁目",
+            "茜部本郷1丁目", "茜部本郷2丁目", "茜部本郷3丁目",
+            "水主町1丁目", "水主町2丁目",
+            "境川1丁目", "境川2丁目", "境川3丁目", "境川4丁目", "境川5丁目",
+            "茜部辰新1丁目", "茜部辰新2丁目",
+        ]
+        # 「茜部」「茜町」は丁目を伴わない町名として規則に記載。
+        if any(area in s for area in akanabe_areas) or re.search(r"岐阜市茜部(?:[-－ー0-9]|$)", s) or "岐阜市茜町" in s:
+            return {
+                "elementary":"岐阜市立茜部小学校",
+                "junior_high":"岐阜市立加納中学校",
+                "source":"岐阜市公式通学区域規則"
+            }
+
+    # 既存の補完参考データ
     if "高山市" in s and ("岡本町1丁目" in s or re.search(r"岡本町1[-－ー]",s)):
-        return {"elementary":"高山市立南小学校","junior_high":"高山市立松倉中学校"}
+        return {
+            "elementary":"高山市立南小学校",
+            "junior_high":"高山市立松倉中学校",
+            "source":"補完参考"
+        }
     return None
 
 def flood_rank_text(rank):
@@ -337,8 +369,15 @@ def perform_search(address):
         return out
     en=names(em,"e"); jn=names(jm,"j")
     fb=get_school_district_fallback(address)
-    elementary=" / ".join(en) if en else (fb["elementary"]+"（補完参考）" if fb else ("公開データで判定できません（要自治体確認）" if es>0 else "学区データを取得できません"))
-    junior=" / ".join(jn) if jn else (fb["junior_high"]+"（補完参考）" if fb else ("公開データで判定できません（要自治体確認）" if js>0 else "学区データを取得できません"))
+    if fb:
+        source_label = fb.get("source", "補完参考")
+        elementary_fallback = f'{fb["elementary"]}（{source_label}）'
+        junior_fallback = f'{fb["junior_high"]}（{source_label}）'
+    else:
+        elementary_fallback = None
+        junior_fallback = None
+    elementary=" / ".join(en) if en else (elementary_fallback if fb else ("公開データで判定できません（要自治体確認）" if es>0 else "学区データを取得できません"))
+    junior=" / ".join(jn) if jn else (junior_fallback if fb else ("公開データで判定できません（要自治体確認）" if js>0 else "学区データを取得できません"))
 
     def facility_list(key):
         out=[]
@@ -357,7 +396,7 @@ def perform_search(address):
         "area_names":area_names or ["該当データなし"],
         "area_explanation":area_explanation(area_names),
         "uses":uses,
-        "fire":" / ".join(fire) if fire else "公開GIS上の該当なし（要確認）",
+        "fire":" / ".join(fire) if fire else "防火・準防火の公開GIS該当なし（要自治体確認）",
         "residence":residence,
         "floods":floods,
         "sediments":sediments,
@@ -377,35 +416,34 @@ HTML = r'''<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f4c81">
-<title>不動産かんたん調査</title>
+<title>不動産かんたん調査｜東海三県 営業版</title>
 <style>
-:root{--bg:#f3f6f9;--card:#fff;--ink:#17212b;--muted:#657381;--accent:#0f4c81;--warn:#8a5a00}
+:root{--bg:#f3f6f9;--card:#fff;--ink:#17212b;--muted:#657381;--accent:#0f4c81;--warn:#9a5b00;--danger:#a52820;--soft:#eef5fa}
 *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;background:var(--bg);color:var(--ink)}
 header{background:linear-gradient(135deg,#0f4c81,#176ea8);color:#fff;padding:18px 16px 22px;position:sticky;top:0;z-index:5;box-shadow:0 2px 10px #0002}
-.wrap{max-width:920px;margin:auto;padding:14px}h1{font-size:22px;margin:0 0 12px}.subtitle{font-size:13px;opacity:.88;margin-bottom:12px}
+.wrap{max-width:920px;margin:auto;padding:14px}h1{font-size:22px;margin:0 0 8px}.subtitle{font-size:13px;opacity:.92;margin-bottom:12px}.scope{display:inline-block;font-size:11px;background:#ffffff24;padding:4px 8px;border-radius:999px;margin-bottom:12px}
 form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radius:10px;font-size:16px;min-width:0}.btn{padding:0 18px;border:0;border-radius:10px;background:#fff;color:var(--accent);font-weight:700;font-size:15px;white-space:nowrap}
 .card{background:#fff;border-radius:14px;padding:17px;margin:12px 0;box-shadow:0 2px 12px #15283b12;border:1px solid #e9eef2}.card h2{font-size:18px;margin:0 0 12px;color:var(--accent)}.card h3{font-size:15px;margin:16px 0 7px}
-.row{display:grid;grid-template-columns:118px 1fr;gap:8px;padding:6px 0;border-bottom:1px solid #edf1f4}.row:last-child{border-bottom:0}.label{color:var(--muted);font-size:14px}.value{font-weight:600}
-.desc{background:#f6f9fb;border-left:4px solid #8bb7d4;padding:10px 12px;border-radius:8px;line-height:1.7;font-size:14px}
-.facility{padding:10px 0;border-bottom:1px solid #edf1f4}.facility:last-child{border-bottom:0}.facility b{display:block;margin-bottom:4px}.meta{font-size:13px;color:var(--muted)}
-.notice{font-size:12px;line-height:1.65;color:var(--muted)}.warn{color:var(--warn)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}
-.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
+.row{display:grid;grid-template-columns:128px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid #edf1f4}.row:last-child{border-bottom:0}.label{color:var(--muted);font-size:14px}.value{font-weight:600}.value.warn{color:var(--danger)}
+.desc{background:#f6f9fb;border-left:4px solid #8bb7d4;padding:10px 12px;border-radius:8px;line-height:1.7;font-size:14px}.facility{padding:10px 0;border-bottom:1px solid #edf1f4}.facility:last-child{border-bottom:0}.facility b{display:block;margin-bottom:4px}.meta{font-size:13px;color:var(--muted)}
+.notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
 @media(max-width:600px){header{padding-top:calc(14px + env(safe-area-inset-top))}.wrap{padding:10px}h1{font-size:20px}form{display:block}.address{width:100%;margin-bottom:8px}.btn{width:100%;height:46px}.card{border-radius:12px;padding:15px;margin:10px 0}.row{grid-template-columns:1fr;gap:2px}.label{font-size:12px}.value{font-size:15px}}
 </style>
 </head>
 <body>
 <header><div class="wrap" style="padding:0">
 <h1>不動産かんたん調査</h1>
-<div class="subtitle">住所から都市計画・防災・生活利便施設・学区をまとめて確認</div>
+<div class="scope">愛知・岐阜・三重｜営業現場向け</div>
+<div class="subtitle">土地・建築制限／ハザード／学区／生活情報をまとめて確認</div>
 <form method="get" action="/" id="searchForm">
-<input class="address" name="address" value="{{ address|e }}" placeholder="例：各務原市那加桐野町7-25" autocomplete="street-address">
+<input class="address" name="address" value="{{ address|e }}" placeholder="例：岐阜市○○町1-2-3" autocomplete="street-address">
 <button class="btn" type="submit">この住所を調査 <span class="spinner">…</span></button>
 </form></div></header>
 <main class="wrap">
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 {% if r %}
-<div class="card"><h2>物件調査結果</h2><div class="row"><div class="label">所在地</div><div class="value">{{ r.address }}</div></div></div>
-<div class="card"><h2>都市計画</h2>
+<div class="card"><h2>📍 物件調査結果</h2><div class="row"><div class="label">所在地</div><div class="value">{{ r.address }}</div></div></div>
+<div class="card"><h2>🏠 土地・建築情報</h2>
 <div class="row"><div class="label">区域区分</div><div class="value">{{ r.area_names|join(' / ') }}</div></div>
 <h3>区域区分について</h3><div class="desc">{{ r.area_explanation }}</div>
 {% if r.uses %}{% for u in r.uses %}
@@ -414,30 +452,42 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <div class="row"><div class="label">容積率</div><div class="value">{{ u.floor }}</div></div>
 <h3>用途地域について</h3><div class="desc">{{ u.description }}</div>
 {% endfor %}{% else %}<div class="row"><div class="label">用途地域</div><div class="value">該当データなし</div></div>{% endif %}
-<h3>防火・建築規制</h3>
-<div class="row"><div class="label">防火・準防火</div><div class="value">{{ r.fire }}</div></div>
-<div class="row"><div class="label">22条区域</div><div class="value">要自治体確認</div></div>
-<div class="row"><div class="label">居住誘導区域</div><div class="value">{{ r.residence }}</div></div>
+<div class="row"><div class="label">防火・準防火</div><div class="value {% if '準防火' in r.fire or '防火地域' in r.fire %}warn{% endif %}">{{ r.fire }}</div></div>
+<div class="notice">※22条区域は営業画面の主要項目から外しました。必要時は自治体の最新情報で確認してください。</div>
 </div>
-<div class="card"><h2>防災情報</h2>
-{% if r.floods %}<div class="row"><div class="label">洪水浸水想定</div><div class="value warn">区域内</div></div>{% for river,depth in r.floods %}<div class="row"><div class="label">河川・浸水深</div><div class="value">{{ river }} ／ {{ depth }}</div></div>{% endfor %}
-{% else %}<div class="row"><div class="label">洪水浸水想定</div><div class="value">該当データなし</div></div>{% endif %}
-{% if r.sediments %}<div class="row"><div class="label">土砂災害</div><div class="value warn">区域内</div></div>{% for s in r.sediments %}<div class="row"><div class="label">{{ s.phenomenon }}</div><div class="value">{{ s.type }}{% if s.name %} ／ {{ s.name }}{% endif %}</div></div>{% endfor %}
-{% else %}<div class="row"><div class="label">土砂災害警戒区域</div><div class="value">該当データなし</div></div>{% endif %}
+<div class="card"><h2>🌊 ハザード情報</h2>
+{% if r.floods %}<div class="row"><div class="label">洪水浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for river,depth in r.floods %}<div class="row"><div class="label">河川・浸水深</div><div class="value">{{ river }} ／ {{ depth }}</div></div>{% endfor %}
+{% else %}<div class="row"><div class="label">洪水浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
+{% if r.sediments %}<div class="row"><div class="label">土砂災害</div><div class="value warn">⚠ 区域内</div></div>{% for s in r.sediments %}<div class="row"><div class="label">{{ s.phenomenon }}</div><div class="value">{{ s.type }}{% if s.name %} ／ {{ s.name }}{% endif %}</div></div>{% endfor %}
+{% else %}<div class="row"><div class="label">土砂災害</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
+<h3>追加確認項目</h3>
+<div class="row"><div class="label">内水</div><div class="value">自動判定準備中（自治体確認）</div></div>
+<div class="row"><div class="label">高潮</div><div class="value">自動判定準備中（自治体確認）</div></div>
+<div class="row"><div class="label">津波</div><div class="value">自動判定準備中（自治体確認）</div></div>
+<div class="notice">※「公開データ上の該当なし」は安全を保証するものではありません。</div>
 </div>
-<div class="card"><h2>生活利便施設・交通</h2>
+<div class="card"><h2>🏫 学区情報</h2>
+<div class="row"><div class="label">小学校区</div><div class="value">{{ r.elementary }}</div></div>
+<div class="row"><div class="label">中学校区</div><div class="value">{{ r.junior }}</div></div>
+<div class="notice">※学区は参考情報です。岐阜市は公式通学区域規則による補完を段階整備中です。判定できない場合に学校名を推測せず「要自治体確認」と表示します。最新の指定校・通学区域は各自治体で確認してください。</div>
+</div>
+<div class="card"><h2>🛒 生活情報</h2>
 {% for label,items in r.facilities.items() %}<h3>{{ label }}</h3>
 {% if items %}{% for f in items %}<div class="facility"><b>{{ loop.index }}. {{ f.name }}</b><div class="meta">{{ f.distance_text }}　{{ f.time_text }}{% if not f.route %}（概算）{% endif %}</div></div>{% endfor %}
 {% else %}<div class="meta">登録データなし</div>{% endif %}{% endfor %}
 </div>
-<div class="card"><h2>教育・学区</h2>
-<div class="row"><div class="label">小学校区</div><div class="value">{{ r.elementary }}</div></div>
-<div class="row"><div class="label">中学校区</div><div class="value">{{ r.junior }}</div></div>
-<div class="notice">※学区は参考情報です。最新の指定校・通学区域は各自治体で確認してください。</div></div>
+<div class="card"><h2>📋 その他の注意情報</h2>
+<div class="row"><div class="label">居住誘導区域</div><div class="value">{{ r.residence }}</div></div>
+<div class="row"><div class="label">高度地区</div><div class="value">自動判定準備中（自治体確認）</div></div>
+<div class="row"><div class="label">都市計画道路</div><div class="value">自動判定準備中（自治体確認）</div></div>
+<div class="row"><div class="label">盛土規制</div><div class="value">自動判定準備中（自治体確認）</div></div>
+<div class="row"><div class="label">地区計画・景観等</div><div class="value">必要に応じ自治体確認</div></div>
+<div class="notice">※「準備中」の項目は現時点で自動判定していません。誤って「該当なし」と表示しないための安全表示です。</div>
+</div>
 <div class="card"><h2>情報源・注意事項</h2><div class="notice">
-・用途地域等：不動産情報ライブラリ（国土交通省）<br>・防火・準防火：不動産情報ライブラリ XKT014<br>・居住誘導区域：不動産情報ライブラリ XKT003<br>・22条区域：自治体の建築指導担当・都市計画GIS等で確認<br>・学区：不動産情報ライブラリ（国土数値情報・令和5年度）を基本とし、一部自治体は補完参考データを使用<br>・公開GISで未判定の場合は「指定なし」「区域外」とは断定していません。<br>・契約・重要事項説明に使用する場合は、必ず最新の行政情報を確認してください。
+・用途地域等：不動産情報ライブラリ（国土交通省）<br>・防火・準防火：不動産情報ライブラリ XKT014<br>・居住誘導区域：不動産情報ライブラリ XKT003<br>・洪水：不動産情報ライブラリ XKT026<br>・土砂災害：不動産情報ライブラリ XKT029<br>・学区：不動産情報ライブラリの公開データを基本とし、岐阜市は公式通学区域規則による補完を段階整備中<br>・公開GISで未判定の場合は「指定なし」「区域外」と断定しません。<br>・契約・重要事項説明に使用する場合は、必ず最新の行政情報を確認してください。
 </div></div>{% endif %}
-<footer>本結果は公開GISデータを利用した参考情報です。「該当データなし」は安全を保証するものではありません。<br>コンビニ・スーパー・駅：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN</footer>
+<footer>東海三県（愛知・岐阜・三重）の営業利用を優先して整備中です。<br>コンビニ・スーパー・駅：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN</footer>
 </main>
 <script>document.getElementById('searchForm').addEventListener('submit',function(){this.classList.add('loading');this.querySelector('.btn').disabled=true;});</script>
 </body></html>'''
