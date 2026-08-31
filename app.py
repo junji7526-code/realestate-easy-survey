@@ -121,7 +121,20 @@ def normalize_japanese_address_for_school(address):
     nums={"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","七":"7","八":"8","九":"9"}
     for k,v in nums.items():
         s=s.replace(f"{k}丁目",f"{v}丁目")
-    return s.replace(" ","").replace("　","")
+    s=s.replace(" ","").replace("　","")
+    s=s.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+
+    # 岐阜市などで「○○1-25」と入力された場合も、
+    # 学区表の「○○1丁目」と照合できるように表記を補正する。
+    # 町名直後の最初の数字だけを丁目として扱い、番地部分は残す。
+    chome_stems = [
+        "茜部大野", "茜部大川", "茜部新所", "茜部神清寺",
+        "茜部寺屋敷", "茜部中島", "茜部野瀬", "茜部菱野",
+        "茜部本郷", "水主町", "境川", "茜部辰新",
+    ]
+    for stem in chome_stems:
+        s=re.sub(rf"({re.escape(stem)})([1-9])[-－ー]", rf"\1\2丁目", s)
+    return s
 
 def get_school_district_fallback(address):
     s=normalize_japanese_address_for_school(address)
