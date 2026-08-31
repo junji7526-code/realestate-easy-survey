@@ -1,3 +1,4 @@
+# BUILD: v2.5-gifu-official-priority-yabuta-fixed (2026-08-31)
 from flask import Flask, request, render_template_string
 import requests
 import math
@@ -5,6 +6,7 @@ import os
 import re
 
 app = Flask(__name__)
+BUILD_VERSION = "v2.5-gifu-school-fix-20260831"
 
 USE_AREA_DESCRIPTIONS = {
     "第一種低層住居専用地域": "低層の戸建住宅を中心とした、静かで落ち着いた住環境を守る地域です。住宅のほか、小規模な店舗兼用住宅や学校などは建てられますが、大きな店舗・事務所・ホテルなどは原則建てられません。",
@@ -136,36 +138,236 @@ def normalize_japanese_address_for_school(address):
         s=re.sub(rf"({re.escape(stem)})([1-9])[-－ー]", rf"\1\2丁目", s)
     return s
 
-def get_school_district_fallback(address):
-    s=normalize_japanese_address_for_school(address)
+def _to_ascii_school_text(text):
+    s = (text or "").replace(" ", "").replace("　", "")
+    s = s.translate(str.maketrans("０１２３４５６７８９", "0123456789"))
+    kanji_num = {"一":"1","二":"2","三":"3","四":"4","五":"5","六":"6","七":"7","八":"8","九":"9","十":"10"}
+    for k, v in kanji_num.items():
+        s = s.replace(k + "丁目", v + "丁目")
+    return s
 
-    # 岐阜市：公式の通学区域規則に基づく補完（段階整備）
-    # 茜部小学校区は、岐阜市例規集「別表第1」で次の区域とされています。
-    # 中学校は「別表第2」により、茜部小学校区の全域が加納中学校区です。
-    if "岐阜市" in s:
-        akanabe_areas = [
-            "茜部大野1丁目", "茜部大野2丁目",
-            "茜部大川1丁目", "茜部大川2丁目",
-            "茜部新所1丁目", "茜部新所2丁目", "茜部新所3丁目", "茜部新所4丁目",
-            "茜部神清寺1丁目", "茜部神清寺2丁目",
-            "茜部寺屋敷1丁目", "茜部寺屋敷2丁目", "茜部寺屋敷3丁目",
-            "茜部中島1丁目", "茜部中島2丁目", "茜部中島3丁目",
-            "茜部野瀬1丁目", "茜部野瀬2丁目", "茜部野瀬3丁目",
-            "茜部菱野1丁目", "茜部菱野2丁目", "茜部菱野3丁目", "茜部菱野4丁目",
-            "茜部本郷1丁目", "茜部本郷2丁目", "茜部本郷3丁目",
-            "水主町1丁目", "水主町2丁目",
-            "境川1丁目", "境川2丁目", "境川3丁目", "境川4丁目", "境川5丁目",
-            "茜部辰新1丁目", "茜部辰新2丁目",
-        ]
-        # 「茜部」「茜町」は丁目を伴わない町名として規則に記載。
-        if any(area in s for area in akanabe_areas) or re.search(r"岐阜市茜部(?:[-－ー0-9]|$)", s) or "岐阜市茜町" in s:
+class _SchoolTableParser(__import__('html.parser').parser.HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.rows=[]; self._in_tr=False; self._in_cell=False; self._cells=[]; self._buf=[]
+    def handle_starttag(self, tag, attrs):
+        tag=tag.lower()
+        if tag=='tr': self._in_tr=True; self._cells=[]
+        elif self._in_tr and tag in ('td','th'): self._in_cell=True; self._buf=[]
+    def handle_endtag(self, tag):
+        tag=tag.lower()
+        if self._in_tr and self._in_cell and tag in ('td','th'):
+            txt=''.join(self._buf).strip()
+            self._cells.append(re.sub(r'\\s+',' ',txt))
+            self._in_cell=False
+        elif tag=='tr' and self._in_tr:
+            if len(self._cells)>=2: self.rows.append(self._cells[:])
+            self._in_tr=False
+    def handle_data(self, data):
+        if self._in_cell: self._buf.append(data)
+
+_GIFU_SCHOOL_TABLE_CACHE = {"rows":None, "at":0}
+
+def _fetch_gifu_school_rows():
+    """岐阜市の学区表を取得。公式例規を優先し、取得不能時のみ公開学区表を補助利用。"""
+    import time
+    now=time.time()
+    if _GIFU_SCHOOL_TABLE_CACHE["rows"] is not None and now-_GIFU_SCHOOL_TABLE_CACHE["at"] < 21600:
+        return _GIFU_SCHOOL_TABLE_CACHE["rows"]
+    urls=[
+        "https://www1.g-reiki.net/gifu/reiki_honbun/i700RG00000608.html",
+        "https://www.seishin-home.com/school/",
+    ]
+    for url in urls:
+        try:
+            r=requests.get(url,timeout=12,headers={"User-Agent":"Mozilla/5.0 RealEstateEasySurvey/2.2"})
+            if r.status_code!=200 or len(r.text)<1000: continue
+            parser=_SchoolTableParser(); parser.feed(r.text)
+            rows=[]
+            for cells in parser.rows:
+                school=(cells[0] or '').strip(); area=''.join(cells[1:]).strip()
+                if school.endswith('小学校') and area and '通学区域' not in area:
+                    rows.append((school,area,url))
+            if len(rows)>=25:
+                _GIFU_SCHOOL_TABLE_CACHE.update(rows=rows,at=now)
+                return rows
+        except Exception:
+            continue
+    _GIFU_SCHOOL_TABLE_CACHE.update(rows=[],at=now)
+    return []
+
+def _split_jp_top_level(text):
+    parts=[]; buf=[]; depth=0
+    for ch in text or '':
+        if ch in '(（': depth+=1
+        elif ch in ')）' and depth>0: depth-=1
+        if ch=='、' and depth==0:
+            parts.append(''.join(buf)); buf=[]
+        else: buf.append(ch)
+    if buf: parts.append(''.join(buf))
+    return [p.strip() for p in parts if p.strip()]
+
+def _expand_area_candidates(area_text):
+    """規則の「○○一、二、三丁目」型を、住所照合用の町丁目候補に展開する。"""
+    raw=_to_ascii_school_text(area_text)
+    parts=_split_jp_top_level(raw)
+    out=[]; stem=None
+    for i,part in enumerate(parts):
+        p=part.strip().replace('まで','')
+        # 単独の「2」「3丁目」などは直前の町名を引き継ぐ
+        m=re.fullmatch(r'([1-9]|10)(丁目)?',p)
+        if m and stem:
+            out.append((f"{stem}{m.group(1)}丁目", False))
+            continue
+        # 「今町1」のように後続が「2、3、4丁目」なら丁目列の先頭とみなす
+        m2=re.match(r'^(.+?)([1-9]|10)$',p)
+        nxt=parts[i+1] if i+1<len(parts) else ''
+        if m2 and re.fullmatch(r'([1-9]|10)(丁目)?',nxt):
+            stem=m2.group(1)
+            out.append((f"{stem}{m2.group(2)}丁目", False))
+            continue
+        # 明示的な丁目。番地条件が後ろにあれば complex とする
+        m3=re.match(r'^(.+?)([1-9]|10)丁目(.*)$',p)
+        if m3:
+            stem=m3.group(1)
+            tail=m3.group(3)
+            out.append((f"{stem}{m3.group(2)}丁目", bool(tail)))
+            continue
+        # 番地条件付きの町名
+        m4=re.match(r'^(.+?)(?:\\(|（)?[0-9,]+番',p)
+        if m4:
+            out.append((m4.group(1), True)); stem=None; continue
+        # 字表記などは町名部分ごと候補にする
+        base=re.split(r'[（(]',p)[0]
+        base=re.sub(r'[0-9,]+番地.*$','',base)
+        if base:
+            out.append((base, bool(re.search(r'[0-9]番|除く|以北|以南|から',p))))
+            stem=None
+    # 長い候補を優先
+    uniq=[]; seen=set()
+    for name,complex_flag in sorted(out,key=lambda x:len(x[0]),reverse=True):
+        if name and name not in seen:
+            seen.add(name); uniq.append((name,complex_flag))
+    return uniq
+
+_GIFU_JHS_BY_ES = {
+    '早田小学校':'岐阜清流中学校','則武小学校':'岐阜清流中学校',
+    '岐阜小学校':'岐阜中央中学校','明郷小学校':'岐阜中央中学校',
+    '徹明さくら小学校':'本荘中学校','本荘小学校':'本荘中学校',
+    '白山小学校':'梅林中学校','梅林小学校':'梅林中学校','華陽小学校':'梅林中学校',
+    '加納小学校':'加納中学校','茜部小学校':'加納中学校',
+    '日野小学校':'長森中学校','長森北小学校':'長森中学校','長森西小学校':'長森中学校','長森東小学校':'長森中学校',
+    '長良西小学校':'長良中学校',
+    '島小学校':'島中学校','木田小学校':'島中学校','城西小学校':'島中学校',
+    '岩野田小学校':'岩野田中学校','岩野田北小学校':'岩野田中学校',
+    '市橋小学校':'精華中学校','鏡島小学校':'精華中学校',
+    '岩小学校':'藍川中学校','芥見小学校':'藍川中学校',
+    '三輪南小学校':'三輪中学校','三輪北小学校':'三輪中学校',
+    '方県小学校':'岐北中学校','黒野小学校':'岐北中学校','西郷小学校':'岐北中学校','網代小学校':'岐北中学校',
+    '厚見小学校':'厚見中学校','鷺山小学校':'青山中学校','常磐小学校':'青山中学校',
+    '加納西小学校':'陽南中学校','三里小学校':'陽南中学校',
+    '七郷小学校':'岐阜西中学校','合渡小学校':'岐阜西中学校',
+    '長森南小学校':'長森南中学校','長良小学校':'東長良中学校','長良東小学校':'東長良中学校',
+    '且格小学校':'境川中学校','鶉小学校':'境川中学校','柳津小学校':'境川中学校',
+}
+
+_GIFU_GIMU_AREAS = {
+    '藍川北学園':['岩井','大蔵台','加野','向加野'],
+    '藍東学園':['大洞柏台','大洞桐が丘','大洞桜台','大洞紅葉が丘','北山','芥見東山','大洞','大洞西','大洞緑山','芥見南山','コモンヒルズ北山'],
+}
+
+# 番地・道路境界で複数校に分かれる代表的な町名。ここは誤判定を避けて自治体確認に回す。
+_GIFU_COMPLEX_TOWNS = {
+    '日光町','大福町','長森岩戸','下土居','細畑華南','長良','長良福光','長良友瀬','長良奥郷','長良西野前','長良子正賀',
+    '白菊町','旦島','一日市場北町','今嶺4丁目','西荘1丁目','西荘2丁目','西荘3丁目','鏡島','鷺山','早田','光町',
+    '下奈良4丁目','芥見','石原'
+}
+
+def _gifu_candidate_matches_local(local, candidate):
+    """岐阜市規則の「○○1丁目」と、入力の「○○1-25」の両方を照合する。"""
+    local=_to_ascii_school_text(local)
+    candidate=_to_ascii_school_text(candidate)
+    if not candidate:
+        return False
+    if local.startswith(candidate):
+        return True
+    # 例: 薮田南1丁目 ↔ 薮田南1-25 / 薮田南1－25
+    if candidate.endswith('丁目'):
+        stem=candidate[:-2]
+        return bool(re.match(rf'^{re.escape(stem)}(?:丁目|[-－ー])', local))
+    return False
+
+def _gifu_city_school_fallback(address):
+    s=normalize_japanese_address_for_school(address)
+    if '岐阜市' not in s: return None
+    local=s.split('岐阜市',1)[1]
+
+    # 2026年度の義務教育学校（公式別表第3）を先に判定
+    for school,stems in _GIFU_GIMU_AREAS.items():
+        if any(local.startswith(_to_ascii_school_text(x)) for x in stems):
             return {
-                "elementary":"岐阜市立茜部小学校",
-                "junior_high":"岐阜市立加納中学校",
-                "source":"岐阜市公式通学区域規則"
+                'elementary':f'岐阜市立{school}（前期課程）',
+                'junior_high':f'岐阜市立{school}（後期課程）',
+                'source':'岐阜市公式通学区域規則（別表第3）'
             }
 
+    # 薮田南1～5丁目は岐阜市公式規則（別表第1）で市橋小学校区。
+    # 別表第2により、市橋小学校区は精華中学校区。
+    # 「薮田南1-25」のようなハイフン住所でも、外部ページ取得に依存せず確実に判定する。
+    # 薮田南1～5丁目は固定公式ルール。番地の有無・ハイフン表記にかかわらず判定する。
+    if re.search(r'薮田南[1-5](?:丁目|[-－ー]|$)', local):
+        return {
+            'elementary':'岐阜市立市橋小学校',
+            'junior_high':'岐阜市立精華中学校',
+            'source':'岐阜市公式通学区域規則（別表第1・第2）'
+        }
+
+    # 茜部は動作確認済みの固定ルールを残す
+    akanabe_areas=[
+        '茜部大野1丁目','茜部大野2丁目','茜部大川1丁目','茜部大川2丁目',
+        '茜部新所1丁目','茜部新所2丁目','茜部新所3丁目','茜部新所4丁目',
+        '茜部神清寺1丁目','茜部神清寺2丁目','茜部寺屋敷1丁目','茜部寺屋敷2丁目','茜部寺屋敷3丁目',
+        '茜部中島1丁目','茜部中島2丁目','茜部中島3丁目','茜部野瀬1丁目','茜部野瀬2丁目','茜部野瀬3丁目',
+        '茜部菱野1丁目','茜部菱野2丁目','茜部菱野3丁目','茜部菱野4丁目','茜部本郷1丁目','茜部本郷2丁目','茜部本郷3丁目',
+        '水主町1丁目','水主町2丁目','境川1丁目','境川2丁目','境川3丁目','境川4丁目','境川5丁目','茜部辰新1丁目','茜部辰新2丁目']
+    if any(a in s for a in akanabe_areas) or re.search(r'岐阜市茜部(?:[-－ー0-9]|$)',s) or '岐阜市茜町' in s:
+        return {'elementary':'岐阜市立茜部小学校','junior_high':'岐阜市立加納中学校','source':'岐阜市公式通学区域規則'}
+
+    rows=_fetch_gifu_school_rows()
+    if not rows: return None
+    matches=[]
+    for school,area,source_url in rows:
+        # 旧校名は2026年度の義務教育学校へ移行済みなので通常小学校判定から除外
+        if school in ('藍川小学校','芥見東小学校'): continue
+        for candidate,complex_flag in _expand_area_candidates(area):
+            c=_to_ascii_school_text(candidate)
+            if c and _gifu_candidate_matches_local(local,c):
+                matches.append((len(c),school,c,complex_flag,source_url)); break
+    if not matches: return None
+    matches.sort(reverse=True)
+    best_len=matches[0][0]
+    best=[m for m in matches if m[0]==best_len]
+    schools={m[1] for m in best}
+    matched_name=best[0][2]
+    # 複数校候補、または代表的な番地境界町名は安全のため自動断定しない
+    if len(schools)!=1 or any(local.startswith(_to_ascii_school_text(x)) for x in _GIFU_COMPLEX_TOWNS):
+        return None
+    es=best[0][1]
+    jhs=_GIFU_JHS_BY_ES.get(es)
+    if not jhs: return None
+    return {
+        'elementary':f'岐阜市立{es}',
+        'junior_high':f'岐阜市立{jhs}',
+        'source':'岐阜市公式通学区域規則準拠（岐阜市全域補完・番地境界は要確認）'
+    }
+
+def get_school_district_fallback(address):
+    # 岐阜市：公式規則準拠の全域補完（安全優先。複雑な番地境界は断定しない）
+    fb=_gifu_city_school_fallback(address)
+    if fb: return fb
+
     # 既存の補完参考データ
+    s=normalize_japanese_address_for_school(address)
     if "高山市" in s and ("岡本町1丁目" in s or re.search(r"岡本町1[-－ー]",s)):
         return {
             "elementary":"高山市立南小学校",
@@ -389,8 +591,17 @@ def perform_search(address):
     else:
         elementary_fallback = None
         junior_fallback = None
-    elementary=" / ".join(en) if en else (elementary_fallback if fb else ("公開データで判定できません（要自治体確認）" if es>0 else "学区データを取得できません"))
-    junior=" / ".join(jn) if jn else (junior_fallback if fb else ("公開データで判定できません（要自治体確認）" if js>0 else "学区データを取得できません"))
+
+    # 岐阜市は国の学区GISより岐阜市公式通学区域規則を優先する。
+    # GIS側の更新差で小中学校の組合せが食い違うケースを防ぐため、
+    # 公式規則で一意に判定できたときは小学校・中学校とも公式判定で上書きする。
+    is_gifu_city = '岐阜市' in normalize_japanese_address_for_school(address)
+    if is_gifu_city and fb:
+        elementary = elementary_fallback
+        junior = junior_fallback
+    else:
+        elementary=" / ".join(en) if en else (elementary_fallback if fb else ("公開データで判定できません（要自治体確認）" if es>0 else "学区データを取得できません"))
+        junior=" / ".join(jn) if jn else (junior_fallback if fb else ("公開データで判定できません（要自治体確認）" if js>0 else "学区データを取得できません"))
 
     def facility_list(key):
         out=[]
@@ -447,6 +658,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <header><div class="wrap" style="padding:0">
 <h1>不動産かんたん調査</h1>
 <div class="scope">愛知・岐阜・三重｜営業現場向け</div>
+<div class="scope" style="font-size:11px;opacity:.8">版: {{ build_version }}</div>
 <div class="subtitle">土地・建築制限／ハザード／学区／生活情報をまとめて確認</div>
 <form method="get" action="/" id="searchForm">
 <input class="address" name="address" value="{{ address|e }}" placeholder="例：岐阜市○○町1-2-3" autocomplete="street-address">
@@ -482,7 +694,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <div class="card"><h2>🏫 学区情報</h2>
 <div class="row"><div class="label">小学校区</div><div class="value">{{ r.elementary }}</div></div>
 <div class="row"><div class="label">中学校区</div><div class="value">{{ r.junior }}</div></div>
-<div class="notice">※学区は参考情報です。岐阜市は公式通学区域規則による補完を段階整備中です。判定できない場合に学校名を推測せず「要自治体確認」と表示します。最新の指定校・通学区域は各自治体で確認してください。</div>
+<div class="notice">※学区は参考情報です。岐阜市は公式通学区域規則準拠の全域補完を行います。番地・道路境界など複雑な区域は誤判定防止のため「要自治体確認」と表示します。判定できない場合に学校名を推測せず「要自治体確認」と表示します。最新の指定校・通学区域は各自治体で確認してください。</div>
 </div>
 <div class="card"><h2>🛒 生活情報</h2>
 {% for label,items in r.facilities.items() %}<h3>{{ label }}</h3>
@@ -498,7 +710,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <div class="notice">※「準備中」の項目は現時点で自動判定していません。誤って「該当なし」と表示しないための安全表示です。</div>
 </div>
 <div class="card"><h2>情報源・注意事項</h2><div class="notice">
-・用途地域等：不動産情報ライブラリ（国土交通省）<br>・防火・準防火：不動産情報ライブラリ XKT014<br>・居住誘導区域：不動産情報ライブラリ XKT003<br>・洪水：不動産情報ライブラリ XKT026<br>・土砂災害：不動産情報ライブラリ XKT029<br>・学区：不動産情報ライブラリの公開データを基本とし、岐阜市は公式通学区域規則による補完を段階整備中<br>・公開GISで未判定の場合は「指定なし」「区域外」と断定しません。<br>・契約・重要事項説明に使用する場合は、必ず最新の行政情報を確認してください。
+・用途地域等：不動産情報ライブラリ（国土交通省）<br>・防火・準防火：不動産情報ライブラリ XKT014<br>・居住誘導区域：不動産情報ライブラリ XKT003<br>・洪水：不動産情報ライブラリ XKT026<br>・土砂災害：不動産情報ライブラリ XKT029<br>・学区：不動産情報ライブラリの公開データを基本とし、岐阜市は公式通学区域規則準拠の全域補完（複雑な番地境界は要自治体確認）<br>・公開GISで未判定の場合は「指定なし」「区域外」と断定しません。<br>・契約・重要事項説明に使用する場合は、必ず最新の行政情報を確認してください。
 </div></div>{% endif %}
 <footer>東海三県（愛知・岐阜・三重）の営業利用を優先して整備中です。<br>コンビニ・スーパー・駅：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN</footer>
 </main>
@@ -512,7 +724,7 @@ def index():
     if address:
         try: result=perform_search(address)
         except Exception as e: error=str(e)
-    return render_template_string(HTML,address=address,r=result,error=error)
+    return render_template_string(HTML,address=address,r=result,error=error,build_version=BUILD_VERSION)
 
 if __name__=="__main__":
     print("不動産かんたん調査 Web版")
