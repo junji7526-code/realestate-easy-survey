@@ -4,26 +4,28 @@ import requests
 import math
 import os
 import re
+from io import BytesIO
+from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
-BUILD_VERSION = "ATRIS v1.0-preview2-20260910"
+BUILD_VERSION = "ATRIS v1.0-preview3-20260910"
 
 USE_AREA_DESCRIPTIONS = {
-    "第一種低層住居専用地域": "低層の戸建住宅を中心とした、静かで落ち着いた住環境を守る地域です。住宅のほか、小規模な店舗兼用住宅や学校などは建てられますが、大きな店舗・事務所・ホテルなどは原則建てられません。",
-    "第二種低層住居専用地域": "低層住宅の良好な住環境を守る地域です。第一種低層住居専用地域より少し用途が広く、一定規模までの日用品店や飲食店なども建てられます。",
-    "田園住居地域": "農地と低層住宅が調和した環境を守る地域です。住宅のほか、農産物の直売所や農家レストランなど、農業と関連する一定の施設も建てられます。",
-    "第一種中高層住居専用地域": "マンションなどの中高層住宅を中心に、良好な住環境を守る地域です。戸建住宅のほか、病院・大学・一定規模までの店舗なども建てられますが、大規模な店舗や娯楽施設などは制限されます。",
-    "第二種中高層住居専用地域": "中高層住宅を中心とした住環境を守る地域です。第一種中高層住居専用地域より用途の幅が広く、一定規模の店舗や事務所なども建てられます。",
-    "第一種住居地域": "住宅の住環境を守りながら、生活に必要な店舗や事務所なども建てられる地域です。住宅・マンションのほか、一定規模までの店舗、事務所、ホテルなども建築できます。",
-    "第二種住居地域": "住宅を中心としながら、第一種住居地域より幅広い店舗・事務所・娯楽施設なども認められる地域です。幹線道路沿いなどで見られることがあります。",
-    "準住居地域": "幹線道路沿いなどで、自動車関連施設と住宅が調和するよう定められた地域です。住宅のほか、店舗・事務所・自動車関連施設など幅広い建物が建てられます。",
-    "近隣商業地域": "近隣の住民が日常の買い物をする店舗などの利便を図る地域です。住宅やマンションのほか、店舗・事務所など幅広い建物が建てられ、商店街や駅周辺などで多く見られます。",
-    "商業地域": "店舗・事務所などの商業施設の利便を優先する地域です。百貨店、飲食店、オフィスなど幅広い用途が認められ、住宅やマンションも建築できます。駅前や中心市街地などで多く見られます。",
-    "準工業地域": "住宅・店舗と工場などが共存する地域です。幅広い建物を建築できますが、周辺に工場や倉庫などがある場合があるため、住環境を確認することが大切です。",
-    "工業地域": "工場の利便を図る地域です。工場のほか住宅や店舗も建てられますが、学校・病院など建築できない用途があります。住宅を検討する場合は周辺の工場や交通量などの確認が重要です。",
-    "工業専用地域": "工場の操業を優先する地域です。工場や倉庫などが中心で、住宅・マンション・学校・病院などは建築できません。住宅用地としては利用できない地域です。",
+    "第一種低層住居専用地域": "低い住宅を中心とした、静かな住環境を守る地域です。大きなお店やホテルなどは、原則として建てられません。",
+    "第二種低層住居専用地域": "低い住宅を中心とした地域です。住宅のほか、小さなお店や飲食店なども建てられます。",
+    "田園住居地域": "農地と低い住宅の環境を守る地域です。住宅のほか、農産物の直売所なども建てられます。",
+    "第一種中高層住居専用地域": "マンションや住宅を中心とした地域です。病院や学校、小さなお店などは建てられますが、大きなお店や遊技施設などには制限があります。",
+    "第二種中高層住居専用地域": "マンションや住宅を中心とした地域です。住宅のほか、お店や事務所なども建てられます。",
+    "第一種住居地域": "住宅の環境を守りながら、お店や事務所なども建てられる地域です。",
+    "第二種住居地域": "住宅を中心としながら、お店や事務所なども建てられる地域です。第一種住居地域より建てられる建物の種類が多くなります。",
+    "準住居地域": "大きな道路の近くなどで、住宅と自動車関係の施設がいっしょに建つ地域です。",
+    "近隣商業地域": "近くに住む人が買い物をしやすいようにした地域です。住宅のほか、お店や事務所なども建てられます。",
+    "商業地域": "お店や事務所を建てやすい地域です。住宅やマンションも建てられます。駅の近くなどに多い地域です。",
+    "準工業地域": "住宅、お店、工場などが建つ地域です。近くに工場や倉庫があることもあるため、周りの様子も確認すると安心です。",
+    "工業地域": "工場を建てやすい地域です。住宅やお店も建てられますが、学校や病院などは建てられません。",
+    "工業専用地域": "工場や倉庫のための地域です。住宅やマンションは建てられません。",
 }
 
 def normalize_use_area_name(name):
@@ -46,6 +48,36 @@ def latlon_to_tile(lat, lon, zoom=15):
     x = int((lon + 180.0) / 360.0 * n)
     y = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
     return x, y
+
+def latlon_to_tile_pixel(lat, lon, zoom=15):
+    """緯度経度を地理院タイル番号とタイル内ピクセルへ変換する。"""
+    lat_rad = math.radians(lat)
+    n = 2 ** zoom
+    xf = (lon + 180.0) / 360.0 * n
+    yf = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
+    return int(xf), int(yf), min(255, int((xf-int(xf))*256)), min(255, int((yf-int(yf))*256))
+
+def get_inland_flood_status(lat, lon):
+    """重ねるハザードマップの内水タイルを一次確認する。
+
+    着色なしは、未整備・未収録との区別ができないため区域外と断定しない。
+    """
+    z = 16
+    x, y, px, py = latlon_to_tile_pixel(lat, lon, z)
+    url = f"https://disaportaldata.gsi.go.jp/raster/02_naisui_data/{z}/{x}/{y}.png"
+    try:
+        response = requests.get(url, timeout=12, headers={"User-Agent":"ATRIS/1.0"})
+        if response.status_code == 404:
+            return {"status":"公開データでは確認できません（自治体確認）","matched":False}
+        response.raise_for_status()
+        with Image.open(BytesIO(response.content)).convert("RGBA") as image:
+            r, g, b, a = image.getpixel((px, py))
+        # 透過又はほぼ無色の地点は、未掲載との区別ができないので断定しない。
+        if a < 32 or (r > 245 and g > 245 and b > 245):
+            return {"status":"公開データの着色を確認できません（自治体確認）","matched":False}
+        return {"status":"内水浸水想定の着色あり（深さは自治体確認）","matched":True}
+    except Exception:
+        return {"status":"内水データを取得できません（自治体確認）","matched":False}
 
 def point_on_segment(px, py, x1, y1, x2, y2, eps=1e-10):
     cross = (px - x1) * (y2 - y1) - (py - y1) * (x2 - x1)
@@ -94,6 +126,18 @@ def get_api_features(api_code, x, y, zoom=15):
     )
     r.raise_for_status()
     return r.json().get("features", [])
+
+def get_api_features_neighborhood(api_code, x, y, zoom=15):
+    """地区計画の縮尺差による取りこぼしを減らすため2縮尺を取得する。"""
+    features=[]; seen=set()
+    for current_zoom,current_x,current_y in ((zoom,x,y),(zoom-1,x//2,y//2)):
+        try: items=get_api_features(api_code,current_x,current_y,current_zoom)
+        except Exception: continue
+        for feature in items:
+            key=(str(feature.get("properties",{})),str(feature.get("geometry",{})))
+            if key not in seen:
+                seen.add(key); features.append(feature)
+    return features
 
 def get_school_district_features_multizoom(api_code, lat, lon):
     all_features, success_count, zooms_with_data, seen = [], 0, [], set()
@@ -496,6 +540,49 @@ def get_nearby_shops(lat,lon,radius=3000,limit_count=3):
     nearby["station"]=top(st)
     return nearby, None if any_success else "周辺施設を取得できませんでした。"
 
+def split_rail_line(line):
+    line=(line or "").strip()
+    prefixes=[
+        ("名古屋市営地下鉄","名古屋市営地下鉄"),("名古屋市営","名古屋市営地下鉄"),
+        ("名鉄","名古屋鉄道"),("近鉄","近畿日本鉄道"),("JR","JR"),
+        ("養老鉄道","養老鉄道"),("樽見鉄道","樽見鉄道"),("長良川鉄道","長良川鉄道"),
+        ("愛知環状鉄道","愛知環状鉄道"),("名古屋臨海高速鉄道","名古屋臨海高速鉄道"),
+        ("東海交通事業","東海交通事業"),("伊勢鉄道","伊勢鉄道"),
+    ]
+    for prefix,operator in prefixes:
+        if line.startswith(prefix):
+            remainder=line[len(prefix):].strip()
+            return operator,remainder or line
+    return "",line
+
+def get_heartrails_stations(lat,lon,limit_count=3):
+    """路線名を含む最寄駅を取得する。取得不能時はGeoapifyへ戻す。"""
+    try:
+        response=requests.get(
+            "https://express.heartrails.com/api/json",
+            params={"method":"getStations","x":lon,"y":lat},timeout=15,
+            headers={"User-Agent":"ATRIS/1.0"})
+        response.raise_for_status()
+        stations=((response.json() or {}).get("response") or {}).get("station") or []
+        if isinstance(stations,dict): stations=[stations]
+        out=[]; seen=set()
+        for station in stations:
+            try: flat=float(station.get("y")); flon=float(station.get("x"))
+            except (TypeError,ValueError): continue
+            name=str(station.get("name") or "").strip()
+            line=str(station.get("line") or "").strip()
+            operator,line_name=split_rail_line(line)
+            key=(name,line)
+            if not name or key in seen: continue
+            seen.add(key)
+            distance=haversine_distance_m(lat,lon,flat,flon)
+            out.append({"name":name,"distance_m":round(distance),"walk_min":walking_minutes_estimate(distance),
+                        "lat":flat,"lon":flon,"operator":operator,"line":line_name})
+        out.sort(key=lambda item:item["distance_m"])
+        return out[:limit_count]
+    except Exception:
+        return []
+
 def get_walking_routes(lat,lon,nearby):
     refs=[]; targets=[]
     for key in ("convenience","supermarket","drugstore","station"):
@@ -524,11 +611,11 @@ def get_walking_routes(lat,lon,nearby):
 def area_explanation(area_names):
     t=" / ".join(area_names)
     if "市街化調整区域" in t:
-        return "市街化を抑制する区域で、原則として建物の建築や開発に制限があります。建築できるかどうかは、許可要件や土地の状況などを個別に確認する必要があります。"
+        return "新しい建物をむやみに増やさないための区域です。建物を建てるには、許可などの条件があります。建てられるかは自治体で確認が必要です。"
     if "市街化区域" in t:
-        return "すでに市街地となっている区域、または今後おおむね10年以内に優先的・計画的に市街化を進める区域です。用途地域などに応じて建てられる建物や規模が定められます。"
+        return "町として整備されている区域です。場所ごとのルールにより、建てられる建物の種類や大きさが決まっています。"
     if "非線引き" in t or "区域区分非設定" in t or ("都市計画区域" in t and "市街化区域" not in t and "市街化調整区域" not in t):
-        return "市街化区域と市街化調整区域の区分を定めていない都市計画区域です。市街化調整区域とは異なり、一律に建築を抑制する区域ではありません。用途地域や道路・建築基準法など、個別の条件を確認する必要があります。"
+        return "市街化区域と市街化調整区域に分けていない地域です。建物を建てるときは、用途地域や道路などの条件を一つずつ確認します。"
     return "区域区分によって建築や開発の条件が異なります。詳細は自治体で確認してください。"
 
 def perform_search(address, current_lat=None, current_lon=None):
@@ -546,7 +633,7 @@ def perform_search(address, current_lat=None, current_lon=None):
     codes={}
     api_codes=["XKT001","XKT002","XKT014","XKT003","XKT020","XKT021","XKT022","XKT023","XKT026","XKT027","XKT028","XKT029","XKT030"]
     def fetch_code(code):
-        features=get_api_features(code,x,y)
+        features=get_api_features_neighborhood(code,x,y) if code=="XKT023" else get_api_features(code,x,y)
         return code,(features if code=="XKT030" else find_matching_features(features,lon,lat))
     with ThreadPoolExecutor(max_workers=10) as pool:
         futures=[pool.submit(fetch_code,code) for code in api_codes]
@@ -554,13 +641,17 @@ def perform_search(address, current_lat=None, current_lon=None):
         school_j=pool.submit(get_school_district_features_multizoom,"XKT005",lat,lon)
         nearby_future=pool.submit(get_nearby_shops,lat,lon)
         drugs_future=pool.submit(get_yahoo_drugstores,lat,lon)
+        stations_future=pool.submit(get_heartrails_stations,lat,lon)
+        inland_future=pool.submit(get_inland_flood_status,lat,lon)
         for future in as_completed(futures):
             code,value=future.result(); codes[code]=value
         ef,es,_=school_e.result(); jf,js,_=school_j.result()
         nearby,shop_error=nearby_future.result(); drugs,drug_error=drugs_future.result()
+        rail_stations=stations_future.result(); inland_flood=inland_future.result()
     em=find_matching_features(ef,lon,lat); jm=find_matching_features(jf,lon,lat)
 
     if drugs: nearby["drugstore"]=drugs
+    if rail_stations: nearby["station"]=rail_stations
     routes=get_walking_routes(lat,lon,nearby) if not shop_error else {}
 
     area_names=[]
@@ -590,7 +681,7 @@ def perform_search(address, current_lat=None, current_lon=None):
             if n and n not in plan_names: plan_names.append(n)
     in_res=any("居住誘導区域" in n for n in plan_names)
     in_plan=any("立地適正化計画区域" in n for n in plan_names)
-    residence="区域内（公開GIS判定）" if in_res else ("区域外（公開GIS判定）" if in_plan else "公開GISでは判定できません（要自治体確認）")
+    residence="区域内（公開されている地図情報による判定）" if in_res else ("公開されている地図情報では着色を確認できません（区域外か自治体確認）" if in_plan else "公開されている地図情報では判定できません（要自治体確認）")
 
     floods=[]
     for f in codes["XKT026"]:
@@ -684,8 +775,12 @@ def perform_search(address, current_lat=None, current_lon=None):
 
     def facility_list(key):
         out=[]
-        for i,f in enumerate(nearby.get(key,[])[:3]):
-            r=routes.get((key,i))
+        ranked=[]
+        for i,f in enumerate(nearby.get(key,[])):
+            route=routes.get((key,i))
+            distance=route.get("route_distance_m") if route else f.get("distance_m",10**9)
+            ranked.append((distance,i,f,route))
+        for _,i,f,r in sorted(ranked,key=lambda row:row[0])[:3]:
             item=dict(f)
             if key=="station":
                 parts=[str(item.get("operator") or "").strip(),str(item.get("line") or "").strip(),str(item.get("name") or "").strip()]
@@ -705,11 +800,12 @@ def perform_search(address, current_lat=None, current_lon=None):
         "area_names":area_names or ["該当データなし"],
         "area_explanation":area_explanation(area_names),
         "uses":uses,
-        "fire":" / ".join(fire) if fire else "防火・準防火の公開GIS該当なし（要自治体確認）",
+        "fire":" / ".join(fire) if fire else "公開されている地図情報では防火・準防火の該当を確認できません（自治体確認）",
         "residence":residence,
         "floods":floods,
         "storm_surges":storm_surges,
         "tsunamis":tsunamis,
+        "inland_flood":inland_flood,
         "sediments":sediments,
         "district_plans":district_plans,
         "planning_roads":planning_roads,
@@ -723,6 +819,7 @@ def perform_search(address, current_lat=None, current_lon=None):
         },
         "elementary":elementary,
         "junior":junior,
+        "history_map_url":f"https://maps.gsi.go.jp/#16/{lat}/{lon}/&base=std&ls=std&disp=1",
         "legal_checks":[
             {"name":"景観法","status":"公開データでは判定できません","note":"自治体の景観計画・届出対象規模を確認"},
             {"name":"宅地造成及び特定盛土等規制法","status":"公開データでは判定できません","note":"大規模盛土造成地マップとは別制度。規制区域図と行為内容を確認"},
@@ -732,8 +829,8 @@ def perform_search(address, current_lat=None, current_lon=None):
             {"name":"急傾斜地法","status":"該当する可能性あり" if any("急傾斜地" in x for x in landslide_prevention) else "公開データでは判定できません","note":"指定区域資料を確認"},
             {"name":"河川法","status":"公開データでは判定できません","note":"河川区域・河川保全区域を確認"},
             {"name":"海岸法・港湾法","status":"公開データでは判定できません","note":"海岸保全区域・港湾区域等を確認"},
-            {"name":"農地法","status":"行為内容により適用","note":"現況・地目・農地区分と転用の有無を確認"},
-            {"name":"森林法","status":"行為内容により適用","note":"地域森林計画対象民有林等を確認"},
+            {"name":"農地法","status":"公開されている情報だけでは判定できません","note":"土地の現在の状態、登記の地目、農地の区分を自治体で確認"},
+            {"name":"森林法","status":"公開されている情報だけでは判定できません","note":"森林法の対象になる土地かを自治体で確認"},
             {"name":"文化財保護法","status":"公開データでは判定できません","note":"埋蔵文化財包蔵地等を自治体で確認"},
             {"name":"航空法","status":"公開データでは判定できません","note":"空港周辺の高さ制限等を確認"},
         ],
@@ -755,7 +852,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 .card{background:#fff;border-radius:14px;padding:17px;margin:12px 0;box-shadow:0 2px 12px #15283b12;border:1px solid #e9eef2}.card h2{font-size:18px;margin:0 0 12px;color:var(--accent)}.card h3{font-size:15px;margin:16px 0 7px}
 .row{display:grid;grid-template-columns:128px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid #edf1f4}.row:last-child{border-bottom:0}.label{color:var(--muted);font-size:14px}.value{font-weight:600}.value.warn{color:var(--danger)}
 .desc{background:#f6f9fb;border-left:4px solid #8bb7d4;padding:10px 12px;border-radius:8px;line-height:1.7;font-size:14px}.facility{padding:10px 0;border-bottom:1px solid #edf1f4}.facility:last-child{border-bottom:0}.facility b{display:block;margin-bottom:4px}.meta{font-size:13px;color:var(--muted)}
-.notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}.loading-screen{display:none;position:fixed;inset:0;background:#052f55ee;color:#fff;z-index:99;align-items:center;justify-content:center;text-align:center;padding:24px}.loading-screen.show{display:flex}.loader-logo{font-size:34px;font-weight:900;letter-spacing:.16em}.loader-ring{width:42px;height:42px;border:4px solid #ffffff55;border-top-color:#fff;border-radius:50%;margin:22px auto;animation:spin .9s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.loan-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.loan-grid label{font-size:12px;color:var(--muted)}.loan-grid input{width:100%;margin-top:4px;padding:10px;border:1px solid #d7e0e7;border-radius:8px;font-size:16px}.loan-result{margin-top:12px;background:var(--soft);padding:12px;border-radius:10px;font-weight:700}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
+.notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}.loading-screen{display:none;position:fixed;inset:0;background:#052f55ee;color:#fff;z-index:99;align-items:center;justify-content:center;text-align:center;padding:24px}.loading-screen.show{display:flex}.loader-logo{font-size:34px;font-weight:900;letter-spacing:.16em}.loader-ring{width:42px;height:42px;border:4px solid #ffffff55;border-top-color:#fff;border-radius:50%;margin:22px auto;animation:spin .9s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.loan-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.loan-grid label{font-size:12px;color:var(--muted)}.loan-grid input{width:100%;margin-top:4px;padding:10px;border:1px solid #d7e0e7;border-radius:8px;font-size:16px}.loan-result{margin-top:12px;background:var(--soft);padding:12px;border-radius:10px;font-weight:700}.history-link{display:inline-block;margin-top:10px;color:var(--accent2);font-weight:700;text-decoration:none}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
 @media(max-width:600px){header{padding-top:calc(14px + env(safe-area-inset-top))}.wrap{padding:10px}form{display:block}.address{width:100%;margin-bottom:8px}.btn{width:100%;height:46px}.card{border-radius:12px;padding:15px;margin:10px 0}.row{grid-template-columns:1fr;gap:2px}.label{font-size:12px}.value{font-size:15px}.brandname{font-size:24px}}
 @media print{header{position:static;background:#fff;color:#123;box-shadow:none;border-bottom:2px solid #0f4c81}.modebar,form,.location-btn,.tools,.loading-screen{display:none!important}.card{box-shadow:none;break-inside:avoid}.wrap{max-width:none}.notice{color:#4d5964}}
 </style>
@@ -790,12 +887,17 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <div class="row"><div class="label">防火・準防火</div><div class="value {% if '準防火' in r.fire or '防火地域' in r.fire %}warn{% endif %}">{{ r.fire }}</div></div>
 <div class="notice">※22条区域は営業画面の主要項目から外しました。必要時は自治体の最新情報で確認してください。</div>
 </div>
+<div class="card"><h2>🕰 土地の履歴（参考）</h2>
+<div class="desc">昔の地図や航空写真を見ると、この土地や周りが以前どのように使われていたかを確認できます。</div>
+<a class="history-link" href="{{ r.history_map_url }}" target="_blank" rel="noopener">国土地理院の地図で土地の成り立ちや昔の写真を見る ↗</a>
+<div class="notice" style="margin-top:10px">※昔の土地利用だけで、現在の土地が安全か危険かを決めることはできません。建物を建てるときは、地盤調査なども合わせて確認すると安心です。</div>
+</div>
 <div class="card"><h2>🌊 ハザード情報</h2>
 {% if r.floods %}<div class="row"><div class="label">洪水浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for river,depth in r.floods %}<div class="row"><div class="label">河川・浸水深</div><div class="value">{{ river }} ／ {{ depth }}</div></div>{% endfor %}
 {% else %}<div class="row"><div class="label">洪水浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
 {% if r.sediments %}<div class="row"><div class="label">土砂災害</div><div class="value warn">⚠ 区域内</div></div>{% for s in r.sediments %}<div class="row"><div class="label">{{ s.phenomenon }}</div><div class="value">{{ s.type }}{% if s.name %} ／ {{ s.name }}{% endif %}</div></div>{% endfor %}
 {% else %}<div class="row"><div class="label">土砂災害</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
-<div class="row"><div class="label">内水</div><div class="value">自動判定準備中（自治体確認）</div></div>
+<div class="row"><div class="label">内水</div><div class="value {% if r.inland_flood.matched %}warn{% endif %}">{{ r.inland_flood.status }}</div></div>
 {% if r.storm_surges %}<div class="row"><div class="label">高潮浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for depth in r.storm_surges %}<div class="row"><div class="label">想定浸水深</div><div class="value">{{ depth }}</div></div>{% endfor %}{% else %}<div class="row"><div class="label">高潮浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
 {% if r.tsunamis %}<div class="row"><div class="label">津波浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for depth in r.tsunamis %}<div class="row"><div class="label">想定浸水深</div><div class="value">{{ depth }}</div></div>{% endfor %}{% else %}<div class="row"><div class="label">津波浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
 <div class="notice">※「公開データ上の該当なし」は安全を保証するものではありません。</div>
@@ -815,7 +917,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <div class="row"><div class="label">高度地区</div><div class="value">自動判定準備中（自治体確認）</div></div>
 <div class="row"><div class="label">都市計画道路</div><div class="value {% if r.planning_roads %}warn{% endif %}">{{ r.planning_roads|join(' / ') if r.planning_roads else '公開データ上、計画線から50m以内の該当なし' }}</div></div>
 <div class="row"><div class="label">大規模盛土造成地</div><div class="value {% if r.embankments %}warn{% endif %}">{{ r.embankments|join(' / ') if r.embankments else '公開データ上の該当なし' }}</div></div>
-<div class="row"><div class="label">地区計画</div><div class="value {% if r.district_plans %}warn{% endif %}">{{ r.district_plans|join(' / ') if r.district_plans else '公開データ上の該当なし' }}</div></div>
+<div class="row"><div class="label">地区計画</div><div class="value {% if r.district_plans %}warn{% endif %}">{{ r.district_plans|join(' / ') if r.district_plans else '公開されている地図情報では確認できません（自治体確認）' }}</div></div>
 <div class="row"><div class="label">地すべり・急傾斜地</div><div class="value {% if r.landslide_prevention %}warn{% endif %}">{{ r.landslide_prevention|join(' / ') if r.landslide_prevention else '公開データ上の該当なし' }}</div></div>
 <div class="row"><div class="label">景観等</div><div class="value">必要に応じ自治体確認</div></div>
 <div class="notice">※都市計画道路は公開された計画線との距離による一次確認です。道路幅を含む区域内外は自治体資料で確認してください。</div>
@@ -823,18 +925,18 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 {% for law in r.legal_checks %}<div class="row"><div class="label">{{ law.name }}</div><div><div class="value {% if '可能性' in law.status %}warn{% endif %}">{{ law.status }}</div><div class="notice">{{ law.note }}</div></div></div>{% endfor %}
 </div>{% endif %}
 <div class="card"><h2>🏦 住宅ローン概算</h2>
-<div class="loan-grid"><label>借入金額（万円）<input id="loanAmount" type="number" value="3000" min="0"></label><label>年利（％）<input id="loanRate" type="number" value="1" min="0" step="0.01"></label><label>返済期間（年）<input id="loanYears" type="number" value="35" min="1"></label><label>ボーナス返済分（万円）<input id="loanBonus" type="number" value="0" min="0"></label></div>
+<div class="loan-grid"><label>借入金額（万円）<input id="loanAmount" type="number" value="3000" min="0"></label><label>年利（％）<input id="loanRate" type="number" value="1" min="0" step="0.01"></label><label>返済期間（年）<input id="loanYears" type="number" value="35" min="1"></label><label>ボーナス1回の返済額（万円・年2回）<input id="loanBonus" type="number" value="0" min="0" step="0.1"></label></div>
 <div class="loan-result" id="loanResult">入力すると毎月の返済額を概算表示します。</div><div class="notice">※元利均等返済による概算です。実際の返済額は金融機関の商品・金利・諸条件により異なります。</div></div>
 <div class="card"><h2>情報源・注意事項</h2><div class="notice">
-・用途地域等：不動産情報ライブラリ（国土交通省）<br>・防火・準防火：XKT014 ／ 居住誘導区域：XKT003<br>・洪水：XKT026 ／ 高潮：XKT027 ／ 津波：XKT028 ／ 土砂災害：XKT029<br>・地区計画：XKT023 ／ 大規模盛土造成地：XKT020<br>・地すべり防止区域：XKT021 ／ 急傾斜地崩壊危険区域：XKT022<br>・学区：不動産情報ライブラリの公開データを基本とし、岐阜市は公式通学区域規則準拠の全域補完（複雑な番地境界は要自治体確認）<br>・公開GISで未判定の場合は「指定なし」「区域外」と断定しません。<br>・契約・重要事項説明に使用する場合は、必ず最新の行政情報を確認してください。
+・用途地域等：不動産情報ライブラリ（国土交通省）<br>・防火・準防火：XKT014 ／ 居住誘導区域：XKT003<br>・洪水：XKT026 ／ 内水：重ねるハザードマップ ／ 高潮：XKT027 ／ 津波：XKT028 ／ 土砂災害：XKT029<br>・地区計画：XKT023 ／ 大規模盛土造成地：XKT020<br>・地すべり防止区域：XKT021 ／ 急傾斜地崩壊危険区域：XKT022<br>・学区：不動産情報ライブラリの公開データを基本とし、岐阜市は公式通学区域規則準拠の全域補完（複雑な番地境界は要自治体確認）<br>・公開されている地図情報で判定できない場合は「指定なし」「区域外」と断定しません。<br>・契約・重要事項説明に使用する場合は、必ず最新の行政情報を確認してください。
 </div></div>{% endif %}
-<footer>東海三県（愛知・岐阜・三重）の営業利用を優先して整備中です。<br>コンビニ・スーパー・駅：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN</footer>
+<footer>東海三県（愛知・岐阜・三重）の営業利用を優先して整備中です。<br>コンビニ・スーパー：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI ／ 駅：HeartRails Express<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN<br>Developed by J. Toriuchi</footer>
 </main>
 <div class="loading-screen" id="loadingScreen"><div><div class="loader-logo">ATRIS</div><div class="loader-ring"></div><div>物件情報を調査しています。<br>そのまま少々お待ちください。</div></div></div>
 <script>
 document.getElementById('searchForm').addEventListener('submit',function(){this.classList.add('loading');this.querySelector('.btn').disabled=true;document.getElementById('loadingScreen').classList.add('show');});
 document.getElementById('locationBtn').addEventListener('click',function(){const btn=this;btn.disabled=true;btn.textContent='現在地を確認しています…';if(!navigator.geolocation){alert('この端末では現在地を取得できません。');btn.disabled=false;return}navigator.geolocation.getCurrentPosition(function(pos){const form=document.getElementById('searchForm');['lat','lon'].forEach(function(name){let el=document.createElement('input');el.type='hidden';el.name=name;el.value=name==='lat'?pos.coords.latitude:pos.coords.longitude;form.appendChild(el)});form.querySelector('.address').required=false;form.submit();document.getElementById('loadingScreen').classList.add('show');},function(){alert('現在地を取得できませんでした。位置情報の利用を許可してください。');btn.disabled=false;btn.textContent='📍 現在地から調査';},{enableHighAccuracy:true,timeout:10000});});
-function calcLoan(){const a=Number(document.getElementById('loanAmount').value)*10000,b=Number(document.getElementById('loanBonus').value)*10000,y=Number(document.getElementById('loanYears').value),rate=Number(document.getElementById('loanRate').value)/1200,n=y*12;if(!a||!y){return}const monthlyPrincipal=Math.max(0,a-b),pay=rate?monthlyPrincipal*rate*Math.pow(1+rate,n)/(Math.pow(1+rate,n)-1):monthlyPrincipal/n;const bonusN=y*2,bonusRate=Number(document.getElementById('loanRate').value)/200,bonusPay=b?(bonusRate?b*bonusRate*Math.pow(1+bonusRate,bonusN)/(Math.pow(1+bonusRate,bonusN)-1):b/bonusN):0;document.getElementById('loanResult').innerHTML='毎月 約 '+Math.round(pay).toLocaleString()+'円'+(b?'<br>ボーナス月 約 '+Math.round(pay+bonusPay).toLocaleString()+'円（年2回）':'');}
+function calcLoan(){const a=Number(document.getElementById('loanAmount').value)*10000,b=Number(document.getElementById('loanBonus').value)*10000,y=Number(document.getElementById('loanYears').value),rate=Number(document.getElementById('loanRate').value)/1200,n=y*12;if(!a||!y){return}let bonusPV=0;for(let month=6;month<=n;month+=6){bonusPV+=b/Math.pow(1+rate,month)}if(bonusPV>=a){document.getElementById('loanResult').textContent='ボーナス返済額が大きすぎます。金額を小さくしてください。';return}const monthlyPrincipal=a-bonusPV,pay=rate?monthlyPrincipal*rate*Math.pow(1+rate,n)/(Math.pow(1+rate,n)-1):monthlyPrincipal/n;document.getElementById('loanResult').innerHTML='通常月　約 '+Math.round(pay).toLocaleString()+'円'+(b?'<br>ボーナス月　約 '+Math.round(pay+b).toLocaleString()+'円<br><span style="font-weight:400;font-size:12px">（通常月の返済＋ボーナス返済 '+Math.round(b).toLocaleString()+'円／年2回）</span>':'');}
 ['loanAmount','loanRate','loanYears','loanBonus'].forEach(id=>document.getElementById(id).addEventListener('input',calcLoan));calcLoan();
 </script>
 </body></html>'''
