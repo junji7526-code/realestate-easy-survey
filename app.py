@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
-BUILD_VERSION = "ATRIS v1.0-preview4-20260913"
+BUILD_VERSION = "ATRIS v1.0-preview5-20260913"
 
 USE_AREA_DESCRIPTIONS = {
     "第一種低層住居専用地域": "低い住宅を中心とした、静かな住環境を守る地域です。大きなお店やホテルなどは、原則として建てられません。",
@@ -946,11 +946,14 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 {% if r.tsunamis %}<div class="row"><div class="label">津波浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for depth in r.tsunamis %}<div class="row"><div class="label">想定浸水深</div><div class="value">{{ depth }}</div></div>{% endfor %}{% else %}<div class="row"><div class="label">津波浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
 <div class="notice">※「公開データ上の該当なし」は安全を保証するものではありません。</div>
 <a class="hazard-link" href="{{ r.hazard_map_url }}" target="_blank" rel="noopener">🗺 重ねるハザードマップで詳しく確認 ↗</a>
+{% if mode == 'public' %}<div class="desc"><b>重ねるハザードマップの見方</b><br>① 右上の「リスク検索」を押します。<br>② 地図を動かし、中央の「＋」を調べたい場所に合わせます。<br>③ その場所の災害リスクが表示されます。</div>{% endif %}
 <div class="notice">※地図上の色の境目や詳しい浸水深は、調べたい地点をクリックして確認してください。</div>
 </div>
-{% if mode == 'public' %}<div class="card"><h2>🏃 近くの指定緊急避難場所</h2>
-{% if r.evacuation_sites %}{% for s in r.evacuation_sites %}<div class="site"><a href="{{ s.map_url }}" target="_blank" rel="noopener">{{ loop.index }}. {{ s.name }} ↗</a><div class="meta">直線距離 約{{ s.distance_m }}m{% if s.address %}　{{ s.address }}{% endif %}</div><div class="meta">対応する災害：{{ s.disasters|join('・') if s.disasters else '公開データで確認できません' }}</div></div>{% endfor %}{% else %}<div class="meta">近くの避難場所を公開データから取得できませんでした。</div>{% endif %}
-<div class="notice" style="margin-top:10px">※災害の種類によって利用できる場所が異なります。開設状況や避難経路を含め、災害時は自治体の最新情報を確認してください。</div></div>{% else %}
+{% if mode in ('public','sales') %}<div class="card"><h2>🏃 近くの指定緊急避難場所</h2>
+{% set shelter_sites = r.evacuation_sites if mode == 'public' else r.evacuation_sites[:3] %}
+{% if shelter_sites %}{% for s in shelter_sites %}<div class="site"><a href="{{ s.map_url }}" target="_blank" rel="noopener">{{ loop.index }}. {{ s.name }} ↗</a><div class="meta">直線距離 約{{ s.distance_m }}m{% if s.address %}　{{ s.address }}{% endif %}</div><div class="meta">対応する災害：{{ s.disasters|join('・') if s.disasters else '公開データで確認できません' }}</div></div>{% endfor %}{% else %}<div class="meta">近くの避難場所を公開データから取得できませんでした。</div>{% endif %}
+<div class="notice" style="margin-top:10px">※災害の種類によって利用できる場所が異なります。開設状況や避難経路を含め、災害時は自治体の最新情報を確認してください。</div></div>{% endif %}
+{% if mode != 'public' %}
 <div class="card"><h2>🏫 学区情報</h2>
 <div class="row"><div class="label">小学校区</div><div class="value">{{ r.elementary }}</div></div>
 <div class="row"><div class="label">中学校区</div><div class="value">{{ r.junior }}</div></div>
