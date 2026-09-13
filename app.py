@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
-BUILD_VERSION = "ATRIS v1.0-preview5-20260913"
+BUILD_VERSION = "ATRIS v1.0-preview6-20260913"
 
 USE_AREA_DESCRIPTIONS = {
     "第一種低層住居専用地域": "低い住宅を中心とした、静かな住環境を守る地域です。大きなお店やホテルなどは、原則として建てられません。",
@@ -171,7 +171,7 @@ def get_nearby_evacuation_sites(lat, lon, limit_count=5):
                 features.append({
                     "name":name,"address":str(p.get("address_ja") or "").strip(),
                     "distance_m":round(distance),"disasters":disasters,
-                    "map_url":f"https://maps.gsi.go.jp/#17/{site_lat}/{site_lon}/&base=std&ls=std&disp=1"
+                    "map_url":f"https://www.google.com/maps/search/?api=1&query={site_lat},{site_lon}"
                 })
     features.sort(key=lambda item:item["distance_m"])
     return features[:limit_count]
@@ -951,7 +951,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 </div>
 {% if mode in ('public','sales') %}<div class="card"><h2>🏃 近くの指定緊急避難場所</h2>
 {% set shelter_sites = r.evacuation_sites if mode == 'public' else r.evacuation_sites[:3] %}
-{% if shelter_sites %}{% for s in shelter_sites %}<div class="site"><a href="{{ s.map_url }}" target="_blank" rel="noopener">{{ loop.index }}. {{ s.name }} ↗</a><div class="meta">直線距離 約{{ s.distance_m }}m{% if s.address %}　{{ s.address }}{% endif %}</div><div class="meta">対応する災害：{{ s.disasters|join('・') if s.disasters else '公開データで確認できません' }}</div></div>{% endfor %}{% else %}<div class="meta">近くの避難場所を公開データから取得できませんでした。</div>{% endif %}
+{% if shelter_sites %}{% for s in shelter_sites %}<div class="site"><strong>{{ loop.index }}. {{ s.name }}</strong><div class="meta">直線距離 約{{ s.distance_m }}m{% if s.address %}　{{ s.address }}{% endif %}</div><div class="meta">対応する災害：{{ s.disasters|join('・') if s.disasters else '公開データで確認できません' }}</div><div class="meta"><a href="{{ s.map_url }}" target="_blank" rel="noopener">📍 Googleマップで場所を確認 ↗</a></div></div>{% endfor %}{% else %}<div class="meta">近くの避難場所を公開データから取得できませんでした。</div>{% endif %}
 <div class="notice" style="margin-top:10px">※災害の種類によって利用できる場所が異なります。開設状況や避難経路を含め、災害時は自治体の最新情報を確認してください。</div></div>{% endif %}
 {% if mode != 'public' %}
 <div class="card"><h2>🏫 学区情報</h2>
