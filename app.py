@@ -8,9 +8,10 @@ from io import BytesIO
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote_plus
 
 app = Flask(__name__)
-BUILD_VERSION = "ATRIS v1.0-preview6-20260913"
+BUILD_VERSION = "ATRIS v1.0-preview8-20260914"
 
 USE_AREA_DESCRIPTIONS = {
     "第一種低層住居専用地域": "低い住宅を中心とした、静かな住環境を守る地域です。大きなお店やホテルなどは、原則として建てられません。",
@@ -60,7 +61,7 @@ def latlon_to_tile_pixel(lat, lon, zoom=15):
 def get_inland_flood_status(lat, lon):
     """重ねるハザードマップの内水タイルを一次確認する。
 
-    着色なしは、未整備・未収録との区別ができないため区域外と断定しない。
+    タイルなし、想定区域外、取得エラーを分けて返す。
     """
     z = 16
     x, y, px, py = latlon_to_tile_pixel(lat, lon, z)
@@ -68,16 +69,16 @@ def get_inland_flood_status(lat, lon):
     try:
         response = requests.get(url, timeout=12, headers={"User-Agent":"ATRIS/1.0"})
         if response.status_code == 404:
-            return {"status":"公開データでは確認できません（自治体確認）","matched":False}
+            return {"status":"自治体データなし","matched":False,"kind":"no_data"}
         response.raise_for_status()
         with Image.open(BytesIO(response.content)).convert("RGBA") as image:
             r, g, b, a = image.getpixel((px, py))
-        # 透過又はほぼ無色の地点は、未掲載との区別ができないので断定しない。
+        # タイル取得成功後、透過又はほぼ無色の地点は想定区域外と表示する。
         if a < 32 or (r > 245 and g > 245 and b > 245):
-            return {"status":"公開データの着色を確認できません（自治体確認）","matched":False}
-        return {"status":"内水浸水想定の着色あり（深さは自治体確認）","matched":True}
+            return {"status":"想定区域外","matched":False,"kind":"outside"}
+        return {"status":"⚠ 区域内（深さは自治体確認）","matched":True,"kind":"inside"}
     except Exception:
-        return {"status":"内水データを取得できません（自治体確認）","matched":False}
+        return {"status":"情報を取得できません","matched":False,"kind":"error"}
 
 def point_on_segment(px, py, x1, y1, x2, y2, eps=1e-10):
     cross = (px - x1) * (y2 - y1) - (py - y1) * (x2 - x1)
@@ -710,7 +711,7 @@ def perform_search(address, current_lat=None, current_lon=None):
     fire=[]
     for f in codes["XKT014"]:
         n=f.get("properties",{}).get("fire_prevention_ja","")
-        if n and n not in fire: fire.append(n)
+        if n in ("防火地域","準防火地域") and n not in fire: fire.append(n)
 
     plan_names=[]
     for f in codes["XKT003"]:
@@ -812,6 +813,13 @@ def perform_search(address, current_lat=None, current_lon=None):
         elementary=" / ".join(en) if en else (elementary_fallback if fb else ("公開データで判定できません（要自治体確認）" if es>0 else "学区データを取得できません"))
         junior=" / ".join(jn) if jn else (junior_fallback if fb else ("公開データで判定できません（要自治体確認）" if js>0 else "学区データを取得できません"))
 
+    def school_map_url(school_name):
+        if not school_name or any(x in school_name for x in ("判定できません","取得できません","要自治体確認")):
+            return None
+        # 補完情報の注記を除き、学校名で検索する。
+        query=re.sub(r"（[^）]*）", "", school_name).split(" / ")[0].strip()
+        return f"https://www.google.com/maps/search/?api=1&query={quote_plus(query)}"
+
     def facility_list(key):
         out=[]
         ranked=[]
@@ -830,6 +838,7 @@ def perform_search(address, current_lat=None, current_lon=None):
                 item.update({"distance_text":f"徒歩距離 約{r['route_distance_m']}m","time_text":f"徒歩 約{r['walk_min']}分","route":True})
             else:
                 item.update({"distance_text":f"直線距離 約{f['distance_m']}m","time_text":f"徒歩目安 約{f['walk_min']}分","route":False})
+            item["map_url"]=f"https://www.google.com/maps/search/?api=1&query={item['lat']},{item['lon']}"
             out.append(item)
         return out
 
@@ -839,7 +848,7 @@ def perform_search(address, current_lat=None, current_lon=None):
         "area_names":area_names or ["該当データなし"],
         "area_explanation":area_explanation(area_names),
         "uses":uses,
-        "fire":" / ".join(fire) if fire else "公開されている地図情報では防火・準防火の該当を確認できません（自治体確認）",
+        "fire":" / ".join(fire) if fire else "指定なし",
         "residence":residence,
         "floods":floods,
         "storm_surges":storm_surges,
@@ -858,6 +867,8 @@ def perform_search(address, current_lat=None, current_lon=None):
         },
         "elementary":elementary,
         "junior":junior,
+        "elementary_map_url":school_map_url(elementary),
+        "junior_map_url":school_map_url(junior),
         "history_map_url":f"https://maps.gsi.go.jp/#16/{lat}/{lon}/&base=std&ls=std&disp=1",
         "hazard_map_url":f"https://disaportal.gsi.go.jp/maps/?base=pale&ll={lat}%2C{lon}&z=15",
         "evacuation_sites":evacuation_sites,
@@ -893,7 +904,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 .card{background:#fff;border-radius:14px;padding:17px;margin:12px 0;box-shadow:0 2px 12px #15283b12;border:1px solid #e9eef2}.card h2{font-size:18px;margin:0 0 12px;color:var(--accent)}.card h3{font-size:15px;margin:16px 0 7px}
 .row{display:grid;grid-template-columns:128px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid #edf1f4}.row:last-child{border-bottom:0}.label{color:var(--muted);font-size:14px}.value{font-weight:600}.value.warn{color:var(--danger)}
 .desc{background:#f6f9fb;border-left:4px solid #8bb7d4;padding:10px 12px;border-radius:8px;line-height:1.7;font-size:14px}.facility{padding:10px 0;border-bottom:1px solid #edf1f4}.facility:last-child{border-bottom:0}.facility b{display:block;margin-bottom:4px}.meta{font-size:13px;color:var(--muted)}
-.notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}.loading-screen{display:none;position:fixed;inset:0;background:#052f55ee;color:#fff;z-index:99;align-items:center;justify-content:center;text-align:center;padding:24px}.loading-screen.show{display:flex}.loader-logo{font-size:34px;font-weight:900;letter-spacing:.16em}.loader-ring{width:42px;height:42px;border:4px solid #ffffff55;border-top-color:#fff;border-radius:50%;margin:22px auto;animation:spin .9s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.loan-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.loan-grid label{font-size:12px;color:var(--muted)}.loan-grid input{width:100%;margin-top:4px;padding:10px;border:1px solid #d7e0e7;border-radius:8px;font-size:16px}.loan-result{margin-top:12px;background:var(--soft);padding:12px;border-radius:10px;font-weight:700}.history-link{display:inline-block;margin-top:10px;color:var(--accent2);font-weight:700;text-decoration:none}.hazard-link{display:block;margin:14px 0 8px;padding:12px 14px;border-radius:10px;background:var(--accent2);color:#fff;text-align:center;font-weight:700;text-decoration:none}.site{padding:11px 0;border-bottom:1px solid #edf1f4}.site:last-child{border-bottom:0}.site a{color:var(--accent2);font-weight:700;text-decoration:none}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
+.notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}.loading-screen{display:none;position:fixed;inset:0;background:#052f55ee;color:#fff;z-index:99;align-items:center;justify-content:center;text-align:center;padding:24px}.loading-screen.show{display:flex}.loader-logo{font-size:34px;font-weight:900;letter-spacing:.16em}.loader-ring{width:42px;height:42px;border:4px solid #ffffff55;border-top-color:#fff;border-radius:50%;margin:22px auto;animation:spin .9s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.loan-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.loan-grid label{font-size:12px;color:var(--muted)}.loan-grid input{width:100%;margin-top:4px;padding:10px;border:1px solid #d7e0e7;border-radius:8px;font-size:16px}.loan-result{margin-top:12px;background:var(--soft);padding:12px;border-radius:10px;font-weight:700}.history-link{display:inline-block;margin-top:10px;color:var(--accent2);font-weight:700;text-decoration:none}.hazard-link{display:block;margin:14px 0 8px;padding:12px 14px;border-radius:10px;background:var(--accent2);color:#fff;text-align:center;font-weight:700;text-decoration:none}.site{padding:11px 0;border-bottom:1px solid #edf1f4}.site:last-child{border-bottom:0}.site a,.facility a,.row a{color:var(--accent2);font-weight:700;text-decoration:none}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
 @media(max-width:600px){header{padding-top:calc(14px + env(safe-area-inset-top))}.wrap{padding:10px}form{display:block}.address{width:100%;margin-bottom:8px}.btn{width:100%;height:46px}.card{border-radius:12px;padding:15px;margin:10px 0}.row{grid-template-columns:1fr;gap:2px}.label{font-size:12px}.value{font-size:15px}.brandname{font-size:24px}}
 @media print{header{position:static;background:#fff;color:#123;box-shadow:none;border-bottom:2px solid #0f4c81}.modebar,form,.location-btn,.tools,.loading-screen{display:none!important}.card{box-shadow:none;break-inside:avoid}.wrap{max-width:none}.notice{color:#4d5964}}
 </style>
@@ -938,13 +949,14 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 {% endif %}
 <div class="card"><h2>🌊 ハザード情報</h2>
 {% if r.floods %}<div class="row"><div class="label">洪水浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for river,depth in r.floods %}<div class="row"><div class="label">河川・浸水深</div><div class="value">{{ river }} ／ {{ depth }}</div></div>{% endfor %}
-{% else %}<div class="row"><div class="label">洪水浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
+{% else %}<div class="row"><div class="label">洪水浸水想定</div><div class="value">想定区域外</div></div>{% endif %}
 {% if r.sediments %}<div class="row"><div class="label">土砂災害</div><div class="value warn">⚠ 区域内</div></div>{% for s in r.sediments %}<div class="row"><div class="label">{{ s.phenomenon }}</div><div class="value">{{ s.type }}{% if s.name %} ／ {{ s.name }}{% endif %}</div></div>{% endfor %}
-{% else %}<div class="row"><div class="label">土砂災害</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
+{% else %}<div class="row"><div class="label">土砂災害</div><div class="value">想定区域外</div></div>{% endif %}
 <div class="row"><div class="label">内水</div><div class="value {% if r.inland_flood.matched %}warn{% endif %}">{{ r.inland_flood.status }}</div></div>
-{% if r.storm_surges %}<div class="row"><div class="label">高潮浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for depth in r.storm_surges %}<div class="row"><div class="label">想定浸水深</div><div class="value">{{ depth }}</div></div>{% endfor %}{% else %}<div class="row"><div class="label">高潮浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
-{% if r.tsunamis %}<div class="row"><div class="label">津波浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for depth in r.tsunamis %}<div class="row"><div class="label">想定浸水深</div><div class="value">{{ depth }}</div></div>{% endfor %}{% else %}<div class="row"><div class="label">津波浸水想定</div><div class="value">公開データ上の該当なし</div></div>{% endif %}
-<div class="notice">※「公開データ上の該当なし」は安全を保証するものではありません。</div>
+{% if r.inland_flood.kind == 'no_data' %}<div class="notice">※自治体の内水ハザードマップをご確認ください。</div>{% elif r.inland_flood.kind == 'error' %}<div class="notice">※時間をおいて再度お試しください。</div>{% endif %}
+{% if r.storm_surges %}<div class="row"><div class="label">高潮浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for depth in r.storm_surges %}<div class="row"><div class="label">想定浸水深</div><div class="value">{{ depth }}</div></div>{% endfor %}{% else %}<div class="row"><div class="label">高潮浸水想定</div><div class="value">想定区域外</div></div>{% endif %}
+{% if r.tsunamis %}<div class="row"><div class="label">津波浸水想定</div><div class="value warn">⚠ 区域内</div></div>{% for depth in r.tsunamis %}<div class="row"><div class="label">想定浸水深</div><div class="value">{{ depth }}</div></div>{% endfor %}{% else %}<div class="row"><div class="label">津波浸水想定</div><div class="value">想定区域外</div></div>{% endif %}
+<div class="notice">※区域外でも災害が起きないとは限りません。</div>
 <a class="hazard-link" href="{{ r.hazard_map_url }}" target="_blank" rel="noopener">🗺 重ねるハザードマップで詳しく確認 ↗</a>
 {% if mode == 'public' %}<div class="desc"><b>重ねるハザードマップの見方</b><br>① 右上の「リスク検索」を押します。<br>② 地図を動かし、中央の「＋」を調べたい場所に合わせます。<br>③ その場所の災害リスクが表示されます。</div>{% endif %}
 <div class="notice">※地図上の色の境目や詳しい浸水深は、調べたい地点をクリックして確認してください。</div>
@@ -955,13 +967,13 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <div class="notice" style="margin-top:10px">※災害の種類によって利用できる場所が異なります。開設状況や避難経路を含め、災害時は自治体の最新情報を確認してください。</div></div>{% endif %}
 {% if mode != 'public' %}
 <div class="card"><h2>🏫 学区情報</h2>
-<div class="row"><div class="label">小学校区</div><div class="value">{{ r.elementary }}</div></div>
-<div class="row"><div class="label">中学校区</div><div class="value">{{ r.junior }}</div></div>
+<div class="row"><div class="label">小学校区</div><div><div class="value">{{ r.elementary }}</div>{% if r.elementary_map_url %}<div class="meta"><a href="{{ r.elementary_map_url }}" target="_blank" rel="noopener">📍 Googleマップで場所を確認 ↗</a></div>{% endif %}</div></div>
+<div class="row"><div class="label">中学校区</div><div><div class="value">{{ r.junior }}</div>{% if r.junior_map_url %}<div class="meta"><a href="{{ r.junior_map_url }}" target="_blank" rel="noopener">📍 Googleマップで場所を確認 ↗</a></div>{% endif %}</div></div>
 <div class="notice">※学区は参考情報です。岐阜市は公式通学区域規則準拠の全域補完を行います。番地・道路境界など複雑な区域は誤判定防止のため「要自治体確認」と表示します。判定できない場合に学校名を推測せず「要自治体確認」と表示します。最新の指定校・通学区域は各自治体で確認してください。</div>
 </div>
 <div class="card"><h2>🛒 生活情報</h2>
 {% for label,items in r.facilities.items() %}<h3>{{ label }}</h3>
-{% if items %}{% for f in items %}<div class="facility"><b>{{ loop.index }}. {{ f.name }}</b><div class="meta">{{ f.distance_text }}　{{ f.time_text }}{% if not f.route %}（概算）{% endif %}</div></div>{% endfor %}
+{% if items %}{% for f in items %}<div class="facility"><b>{{ loop.index }}. {{ f.name }}</b><div class="meta">{{ f.distance_text }}　{{ f.time_text }}{% if not f.route %}（概算）{% endif %}</div><div class="meta"><a href="{{ f.map_url }}" target="_blank" rel="noopener">📍 Googleマップで場所を確認 ↗</a></div></div>{% endfor %}
 {% else %}<div class="meta">登録データなし</div>{% endif %}{% endfor %}
 </div>
 {% endif %}
