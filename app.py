@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote_plus
 
 app = Flask(__name__)
-BUILD_VERSION = "preview14-20260920"
+BUILD_VERSION = "preview16-20260921"
 
 USE_AREA_DESCRIPTIONS = {
     "第一種低層住居専用地域": "低い住宅を中心とした、静かな住環境を守る地域です。大きなお店やホテルなどは、原則として建てられません。",
@@ -1022,7 +1022,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 .card{background:#fff;border-radius:14px;padding:17px;margin:12px 0;box-shadow:0 2px 12px #15283b12;border:1px solid #e9eef2}.card h2{font-size:18px;margin:0 0 12px;color:var(--accent)}.card h3{font-size:15px;margin:16px 0 7px}
 .row{display:grid;grid-template-columns:128px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid #edf1f4}.row:last-child{border-bottom:0}.label{color:var(--muted);font-size:14px}.value{font-weight:600}.value.warn{color:var(--danger)}
 .desc{background:#f6f9fb;border-left:4px solid #8bb7d4;padding:10px 12px;border-radius:8px;line-height:1.7;font-size:14px}.facility{padding:10px 0;border-bottom:1px solid #edf1f4}.facility:last-child{border-bottom:0}.facility b{display:block;margin-bottom:4px}.meta{font-size:13px;color:var(--muted)}
-.notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}.loading-screen{display:none;position:fixed;inset:0;background:#052f55ee;color:#fff;z-index:99;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:auto;-webkit-overflow-scrolling:touch}.loading-screen.show{display:flex}.loading-panel{width:min(520px,100%)}.loader-logo{font-size:29px;font-weight:900;letter-spacing:.03em;line-height:1.35}.quiz{margin-top:20px;background:#fff;color:var(--ink);border-radius:16px;padding:18px;text-align:left}.quiz-label{font-size:12px;color:var(--accent2);font-weight:800}.quiz-question{font-weight:700;line-height:1.6;margin:7px 0 12px}.quiz-options{display:grid;gap:8px}.quiz-option{border:1px solid #bfd0dd;background:#f7fbfe;color:var(--ink);padding:12px;border-radius:10px;text-align:left;font-size:15px;min-height:44px;cursor:pointer;touch-action:manipulation;-webkit-appearance:none;appearance:none}.quiz-option:disabled{opacity:.75}.quiz-answer{display:none;margin-top:11px;background:var(--soft);padding:10px;border-radius:9px;line-height:1.55;font-size:13px}.quiz-answer.show{display:block}.loan-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.loan-grid label{font-size:12px;color:var(--muted)}.loan-grid input{width:100%;margin-top:4px;padding:10px;border:1px solid #d7e0e7;border-radius:8px;font-size:16px}.loan-result{margin-top:12px;background:var(--soft);padding:12px;border-radius:10px;font-weight:700}.history-link{display:inline-block;margin-top:10px;color:var(--accent2);font-weight:700;text-decoration:none}.hazard-link{display:block;margin:14px 0 8px;padding:12px 14px;border-radius:10px;background:var(--accent2);color:#fff;text-align:center;font-weight:700;text-decoration:none}.site{padding:11px 0;border-bottom:1px solid #edf1f4}.site:last-child{border-bottom:0}.site a,.facility a,.row a{color:var(--accent2);font-weight:700;text-decoration:none}.law-links{display:grid;gap:5px;margin-top:6px}.law-links a{color:var(--accent2);font-size:12px;font-weight:700;text-decoration:none}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
+.notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}.loading-screen{display:none;position:fixed;inset:0;background:#052f55ee;color:#fff;z-index:99;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:auto;-webkit-overflow-scrolling:touch}.loading-screen.show{display:flex}.loading-panel{width:min(520px,100%)}.loader-logo{font-size:29px;font-weight:900;letter-spacing:.03em;line-height:1.35}.quiz{margin-top:20px;background:#fff;color:var(--ink);border-radius:16px;padding:18px;text-align:left}.quiz-label{font-size:12px;color:var(--accent2);font-weight:800}.quiz-question{font-weight:700;line-height:1.6;margin:7px 0 12px}.quiz-options{display:grid;gap:8px}.quiz-option{border:1px solid #bfd0dd;background:#f7fbfe;color:var(--ink);padding:12px;border-radius:10px;text-align:left;font-size:15px;min-height:44px;cursor:pointer;touch-action:manipulation;-webkit-appearance:none;appearance:none}.quiz-option:disabled{opacity:.75}.quiz-answer{display:none;margin-top:11px;background:var(--soft);padding:10px;border-radius:9px;line-height:1.55;font-size:13px}.quiz-answer.show{display:block}.quiz-next{display:none;width:100%;margin-top:10px;border:0;border-radius:10px;background:var(--accent2);color:#fff;padding:11px 14px;font-size:15px;font-weight:800;cursor:pointer;touch-action:manipulation}.quiz-next.show{display:block}.loan-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.loan-grid label{font-size:12px;color:var(--muted)}.loan-grid input{width:100%;margin-top:4px;padding:10px;border:1px solid #d7e0e7;border-radius:8px;font-size:16px}.loan-result{margin-top:12px;background:var(--soft);padding:12px;border-radius:10px;font-weight:700}.history-link{display:inline-block;margin-top:10px;color:var(--accent2);font-weight:700;text-decoration:none}.hazard-link{display:block;margin:14px 0 8px;padding:12px 14px;border-radius:10px;background:var(--accent2);color:#fff;text-align:center;font-weight:700;text-decoration:none}.site{padding:11px 0;border-bottom:1px solid #edf1f4}.site:last-child{border-bottom:0}.site a,.facility a,.row a{color:var(--accent2);font-weight:700;text-decoration:none}.law-links{display:grid;gap:5px;margin-top:6px}.law-links a{color:var(--accent2);font-size:12px;font-weight:700;text-decoration:none}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
 @media(max-width:600px){.brandbar{padding-top:env(safe-area-inset-top)}.brandwrap{padding:8px 10px!important}.brand{gap:10px}.brandmark{width:52px;height:52px;flex-basis:52px}.brandname{font-size:14px}.brand-title{font-size:22px}.brandline{font-size:12px;margin-top:7px;padding-top:6px}header{padding:9px 10px 14px}.wrap{padding:10px}form{display:block}.address{width:100%;margin-bottom:8px}.btn{width:100%;height:46px}.card{border-radius:12px;padding:15px;margin:10px 0}.row{grid-template-columns:1fr;gap:2px}.label{font-size:12px}.value{font-size:15px}.loan-grid{grid-template-columns:1fr}.quiz{padding:15px}}
 @media print{.brandbar{position:static;background:#fff;color:#123;box-shadow:none}header{background:#fff;color:#123;border-bottom:2px solid #0f4c81}.modebar,form,.location-btn,.tools,.loading-screen{display:none!important}.card{box-shadow:none;break-inside:avoid}.wrap{max-width:none}.notice{color:#4d5964}}
 </style>
@@ -1120,7 +1120,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 </div></div>{% endif %}
 <footer>東海三県（愛知・岐阜・三重）の営業利用を優先して整備中です。<br>コンビニ・スーパー：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI ／ 駅：HeartRails Express<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN<br>Developed by J. Toriuchi</footer>
 </main>
-<div class="loading-screen" id="loadingScreen"><div class="loading-panel"><div class="loader-logo">不動さんの<br>らくらく物件調査</div><div style="margin-top:10px">物件情報を調査しています。<br>そのまま少々お待ちください。</div><div class="quiz" id="quizBox"><div class="quiz-label" id="quizLabel"></div><div class="quiz-question" id="quizQuestion"></div><div class="quiz-options" id="quizOptions"></div><div class="quiz-answer" id="quizAnswer"></div></div></div></div>
+<div class="loading-screen" id="loadingScreen"><div class="loading-panel"><div class="loader-logo">不動さんの<br>らくらく物件調査</div><div style="margin-top:10px">物件情報を調査しています。<br>そのまま少々お待ちください。</div><div class="quiz" id="quizBox"><div class="quiz-label" id="quizLabel"></div><div class="quiz-question" id="quizQuestion"></div><div class="quiz-options" id="quizOptions"></div><div class="quiz-answer" id="quizAnswer"></div><button type="button" class="quiz-next" id="quizNext">次のクイズへ</button></div></div></div>
 <script>
 const currentMode={{ mode|tojson }};
 const quickGuide=document.getElementById('quickGuide');
@@ -1146,13 +1146,99 @@ internal:{label:'不動さんからの宅建ミニクイズ',items:[
 {q:'既存建物の検査済証が確認できない場合、最も適切な対応は？',options:['直ちに違反建築物と断定する','登記があれば適法と判断する','行政資料を調べ、必要に応じて専門家にも確認する','固定資産税が課税されていれば調査不要'],correct:2,explanation:'正解は「行政資料を調べ、必要に応じて専門家にも確認する」です。検査済証が見つからないことだけで、適法・違法を断定することはできません。'},
 {q:'建ぺい率と容積率の説明として正しいものは？',options:['建ぺい率は延べ面積、容積率は建築面積の割合','どちらも延べ面積の割合','建ぺい率は建築面積、容積率は延べ面積の割合','どちらも全国一律'],correct:2,explanation:'正解は「建ぺい率は建築面積、容積率は延べ面積の割合」です。いずれも敷地面積に対する割合です。'}]}}
 ;
-let quizAnswered=false,quizAnsweredAt=0,pendingPage=null,transitionTimer=null;
-function openFetchedPage(){if(!pendingPage)return;const page=pendingPage;pendingPage=null;window.location.href=page.url;}
-function scheduleFetchedPage(){if(!pendingPage)return;if(transitionTimer)clearTimeout(transitionTimer);const now=Date.now();const wait=quizAnswered?Math.max(0,4000-(now-quizAnsweredAt)):Math.max(0,6000-(now-pendingPage.startedAt));transitionTimer=setTimeout(openFetchedPage,wait);}
-function prepareQuiz(){quizAnswered=false;quizAnsweredAt=0;const set=quizSets[currentMode]||quizSets.sales;const item=set.items[Math.floor(Math.random()*set.items.length)];document.getElementById('quizLabel').textContent=set.label;document.getElementById('quizQuestion').textContent=item.q;const options=document.getElementById('quizOptions');const answer=document.getElementById('quizAnswer');options.innerHTML='';answer.classList.remove('show');item.options.forEach(function(label,index){const button=document.createElement('button');button.type='button';button.className='quiz-option';button.textContent=(item.options.length===4?(index+1)+'．':'')+label;button.addEventListener('click',function(){quizAnswered=true;quizAnsweredAt=Date.now();options.querySelectorAll('button').forEach(function(b){b.disabled=true});answer.textContent=(index===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');scheduleFetchedPage()});options.appendChild(button)});}
+function addYesNo(set,text){text.trim().split('\n').forEach(function(line){const r=line.split('|');set.items.push({q:r[0],options:['はい','いいえ'],correct:r[1]==='1'?0:1,explanation:r[2]})})}
+function addFourText(set,text){text.trim().split('\n').forEach(function(line){const r=line.split('|');set.items.push({q:r[0],options:r[1].split('~'),correct:Number(r[2]),explanation:r[3]})})}
+addYesNo(quizSets.public,`避難場所は平常時に家族で確認しておくとよい？|1|事前に場所と経路、家族の連絡方法を確認しましょう。
+大雨で道路が冠水しているとき、車なら通ってもよい？|0|水深や流れが分からない冠水路には車でも入らないでください。
+ハザードマップは洪水・土砂災害・津波などを分けて確認する？|1|災害の種類ごとに想定区域や避難先が異なります。
+避難指示が出ても自宅が新しければ必ず安全？|0|建物の新しさだけで判断せず自治体の情報を確認します。
+非常用の水や食料は定期的に期限を確認する？|1|普段使いしながら補充する方法も有効です。
+停電に備えて懐中電灯やモバイルバッテリーを用意する？|1|すぐ使える場所に準備しておくと安心です。
+地震の直後は慌てて屋外へ飛び出した方がよい？|0|まず身を守り、落下物など周囲の状況を確認します。
+家具の転倒防止は地震への備えになる？|1|家具の固定は転倒や移動によるけがの防止に役立ちます。
+津波警報が出たら海の様子を確認してから避難する？|0|海岸には近づかず直ちに高い場所などへ避難します。
+土砂災害の危険がある場所では崖や沢から離れた部屋も検討する？|1|避難が難しい場合も崖や沢から離れることが大切です。
+避難経路は一つだけ決めておけば十分？|0|冠水や倒木に備えて複数の経路を考えましょう。
+ペットと避難する場合は自治体の受入ルールを確認する？|1|同行避難の方法や必要用品は自治体ごとに確認します。
+災害用伝言サービスの使い方を家族で試しておくとよい？|1|通信が混雑したときの連絡手段として役立ちます。
+内水氾濫は川から離れていれば絶対に起きない？|0|排水が追いつかず川から離れた場所でも起こり得ます。
+地下や低い場所は大雨のとき浸水に注意する？|1|水が流れ込みやすいため早めの移動が重要です。
+浸水想定区域外なら水害への備えは不要？|0|想定を超える雨や局地的な浸水にも備えます。
+避難所へ行くことだけが避難である？|0|安全な親戚宅や上階への移動なども避難です。
+大雨の予報があるときは明るいうちに避難を考える？|1|暗くなったり雨が強くなったりする前が安全です。
+非常持出袋はすぐ持ち出せる場所に置く？|1|玄関付近など取り出しやすい場所が適しています。
+火災時に煙が充満していたら低い姿勢で避難する？|1|煙をできるだけ吸わないよう低い姿勢で移動します。
+地震後にガス臭がするとき電気のスイッチを操作してよい？|0|火花の可能性があるため操作せず安全な場所から連絡します。
+地域の標高や土地の高低差も防災確認の参考になる？|1|水が集まりやすい低地など地形の確認も役立ちます。
+避難場所の看板があればどの災害でも利用できる？|0|対応する災害の種類を必ず確認してください。
+防災情報は古い紙の地図だけ見れば十分？|0|指定や想定区域は更新されるため最新情報も確認します。
+高齢者や乳幼児がいる家庭は早めの避難を考える？|1|移動に時間がかかる場合は早めの判断が重要です。
+災害時に必要な薬は持ち出しを考えておく？|1|常用薬やお薬手帳の情報も準備します。
+通勤先や学校周辺の災害リスクも確認する？|1|外出中の災害に備えてそれぞれの場所を確認しましょう。`);
+addYesNo(quizSets.sales,`物件調査では住所だけでなく地番も確認した方がよい？|1|住居表示と地番は異なることがあるため正確に確認します。
+用途地域が分かれば建築できる建物を確定できる？|0|接道、防火、地区計画などほかの規制も確認します。
+公図は必ず現地の境界と完全に一致する？|0|境界標や測量図、現地状況も確認します。
+登記簿の面積と実測面積が異なることはある？|1|古い測量などにより差が生じる場合があります。
+前面道路は見た目の幅だけで建築基準法上の道路と判断できる？|0|道路種別や指定を行政資料などで確認します。
+セットバック部分は建築敷地として自由に使える？|0|道路として確保する部分で建築物などが制限されます。
+角地では建ぺい率が緩和される場合がある？|1|特定行政庁の条件に該当するか確認が必要です。
+容積率は指定容積率だけ確認すればよい？|0|前面道路幅員による制限なども確認します。
+市街化調整区域ではどの住宅も自由に建て替えられる？|0|許可履歴や立地基準などの個別確認が必要です。
+検査済証が見つからないだけで違反建築と断定できる？|0|行政資料などを調べて判断します。
+中古住宅では増改築の履歴も確認した方がよい？|1|未登記部分や現況との相違の確認に役立ちます。
+固定資産税の課税明細だけで所有権を確定できる？|0|所有権は登記事項証明書などで確認します。
+私道に接する物件では通行・掘削の権利関係も確認する？|1|利用やライフライン工事に影響するため重要です。
+前面道路に水道管があれば必ず敷地へ引込み済み？|0|引込管の有無、口径、権利や費用を確認します。
+下水道区域内なら必ず敷地内に公共ますがある？|0|整備状況や公共ますの位置を個別に確認します。
+越境物が見つかったら売買前に対応方針を確認する？|1|是正や覚書などの取扱いを整理します。
+ハザードマップで区域外なら安全と断定してよい？|0|想定条件があるため区域外でも断定を避けます。
+水害ハザードマップは最新の自治体資料も確認する？|1|公開時期や対象河川も含め最新資料を確認します。
+最寄駅までの時間は直線距離だけで確定できる？|0|経路、踏切、坂道などで所要時間は変わります。
+学区は隣接する番地でも異なる場合がある？|1|番地や道路境界で指定校が変わる場合があります。
+近隣施設の営業状況は公式情報でも確認した方がよい？|1|閉店や移転があるため最新情報を確認します。
+住宅ローンの概算額は正式な審査結果と同じ？|0|金利、審査、諸費用などで異なる概算です。
+管理費や修繕積立金は将来変更される可能性がある？|1|長期修繕計画や総会決議などで変更されます。
+マンション調査では専有部分だけ確認すればよい？|0|管理規約、共用部分、修繕計画なども確認します。
+告知事項は営業担当の感覚だけで説明範囲を決めてよい？|0|法令、ガイドライン、社内基準を踏まえて判断します。
+現況と広告資料が違う場合は相違点を確認して修正する？|1|誤解がないよう最新情報へ修正します。
+推測を調査結果として伝えてよい？|0|不明点は不明とし確認先と確認方法を案内します。`);
+addFourText(quizSets.internal,`2項道路の反対側が川の場合に特に確認すべきものは？|道路中心線だけ~対岸だけ~道路境界と反対側の状況~用途地域だけ|2|一方後退となる場合があるため行政確認が必要です。
+建築基準法上の道路種別を確認する主な窓口は？|税務署~特定行政庁の建築担当窓口~法務局だけ~消防署だけ|1|道路台帳だけで確定しない場合もあり建築担当窓口で確認します。
+登記事項証明書で直接確認できないものは？|所有者~抵当権~地積~現地の境界標の位置|3|境界標は現地確認や測量資料で確認します。
+公図の利用方法として最も適切なものは？|現地境界を確定する唯一の資料~土地の位置関係を確認する資料~道路幅員を確定する資料~建築確認を不要にする資料|1|公図は位置関係の資料であり境界確定には追加確認が必要です。
+地積測量図がない土地への対応として最も適切なものは？|面積を推測~公簿面積を実測と断定~必要に応じ測量を検討~取引不可と断定|2|取引条件や利用目的に応じて測量を検討します。
+都市計画道路の計画線に近い土地で優先する確認は？|地図の見た目だけ~都市計画担当窓口で区域や事業状況を確認~所有者の記憶だけ~固定資産税額だけ|1|計画区域と事業認可等の状況を担当窓口で確認します。
+地区計画がある区域で確認すべきものは？|名称だけ~建物用途や壁面位置などの制限~所有者の職業~固定資産評価額だけ|1|地区ごとに用途、壁面位置、高さ等の制限を確認します。
+防火地域内の建築計画で最も適切な対応は？|木造はすべて自由~規模や構造に応じた防火性能を確認~用途地域だけ確認~登記地目だけ確認|1|具体的な規模や構造で適用される防火性能を確認します。
+法22条区域について最も適切な説明は？|準防火地域と同一~屋根などに防火上の制限がある区域~容積率を定める区域~開発許可を不要にする区域|1|防火・準防火地域とは別に屋根等へ制限がかかります。
+既存不適格建築物の説明として最も適切なものは？|必ず違反建築物~建築時は適法で法改正等により現行規定に合わない建築物~未登記建築物~検査済証がない全建築物|1|建築時に適法だった点で違反建築物と区別します。
+未登記増築が疑われる場合の対応は？|無視する~登記面積と現況を比較し資料を確認~課税済みなら適法と断定~直ちに解体|1|確認申請や課税資料なども含めて調べます。
+境界標が見当たらない土地で最も適切な対応は？|塀を境界と断定~隣人の話だけで確定~測量資料や関係者確認を検討~公図の線を直接当てる|2|境界を安易に断定せず測量資料等を確認します。
+私道持分がない物件で特に確認すべきものは？|建物の色~通行・掘削承諾や権利関係~売主の年齢~用途地域だけ|1|将来の通行やライフライン工事に影響します。
+位置指定道路について確認すべきものは？|指定番号・指定図と現況~固定資産評価だけ~町内会費だけ~登記地目だけ|0|指定内容と現地の幅員などを照合します。
+接道間口が2mぎりぎりの敷地で適切な対応は？|目測で十分~有効幅を測量資料等で慎重に確認~建物があれば不要~隣地通行で代用|1|接道義務に直結するため有効幅を慎重に確認します。
+高低差のある土地で確認の優先度が高いものは？|擁壁の構造・許可等の資料~近所の評判だけ~郵便番号~町名の由来|0|安全性や再建築費用に影響するため擁壁資料を確認します。
+盛土規制法の調査として最も適切なものは？|全国一律で区域内と判断~最新の規制区域図と工事内容を確認~登記地目だけ確認~建物用途だけ確認|1|区域指定と行為に対する許可等を個別に調べます。
+農地を宅地利用したい場合にまず確認するものは？|農地法上の手続きと都市計画上の規制~建物の色~固定資産税だけ~隣地の用途だけ|0|農地転用と都市計画上の立地規制を確認します。
+造成を伴う計画で最も適切な対応は？|造成後に確認~着手前に許可・届出の要否を確認~登記後に確認~売却時だけ確認|1|工事着手前の計画段階で行政へ相談します。
+水害ハザードマップの重要事項説明で確認するものは？|対象物件のおおよその県~水防法に基づく図面上の物件所在地~売主の避難経験だけ~保険料だけ|1|使用した水害ハザードマップ上で物件所在地を示します。
+指定緊急避難場所と指定避難所について適切なものは？|常に同じ~目的が異なるため区別して確認~どちらもホテル~所有者が決める|1|災害から逃れる場所と避難生活の施設は役割が異なります。
+内水ハザード情報で注意すべき点は？|全国で同じ整備状況~自治体により公開状況や想定条件が異なる~河川洪水と完全に同じ~区域外なら確認不要|1|自治体ごとの公開状況と最新資料を確認します。
+建物状況調査の説明として最も適切なものは？|瑕疵がないことを保証~一定の基準に基づき建物の状況を調査~価格を決定~登記を変更|1|保証や不動産鑑定ではなく建物の状況を調べる制度です。
+アスベスト調査で最も適切な対応は？|築年だけで断定~設計図書等を確認し必要に応じ専門調査~見た目だけで判断~登記になければ不存在|1|資料確認と必要に応じた専門調査で判断します。
+マンションの長期修繕計画で確認すべきものは？|計画の有無・更新状況・積立状況~専有者の職業~最寄りコンビニだけ~登記地目|0|将来負担の検討材料として計画と積立状況を確認します。
+管理規約と使用細則について最も適切なものは？|両方確認する~規約だけで十分~口頭説明だけで十分~売買後に確認|0|用途、ペット、工事等の制限は両方の資料で確認します。
+賃貸中物件の売買で特に確認すべきものは？|賃貸借契約・敷金・滞納等~外壁の色だけ~買主の勤務先だけ~町内会名だけ|0|買主が承継する賃貸借上の権利義務を整理します。
+借地権付き建物の取引で確認すべきものは？|土地賃貸借契約と譲渡承諾等~建物登記だけ~固定資産税だけ~用途地域だけ|0|地代、期間、更新条件、譲渡承諾等を確認します。
+越境に関する覚書で確認すべきものは？|対象・是正時期・承継条項等~署名の色だけ~作成日の曜日~仲介会社のロゴ|0|将来の是正方法と承継内容を明確にします。
+調査資料同士に矛盾がある場合の対応は？|都合のよい資料を採用~矛盾を明示し追加確認~平均値を使う~推測で埋める|1|根拠と相違点を記録し確認先へ追加照会します。`);
+const quizQueues={};
+function refillQuizQueue(mode,count){const queue=Array.from({length:count},function(_,i){return i});for(let i=queue.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=queue[i];queue[i]=queue[j];queue[j]=t}quizQueues[mode]=queue;}
+function openFetchedPage(html,url){history.replaceState(null,'',url);document.open();document.write(html);document.close();}
+function prepareQuiz(){const mode=quizSets[currentMode]?currentMode:'sales';const set=quizSets[mode];if(!quizQueues[mode]||!quizQueues[mode].length)refillQuizQueue(mode,set.items.length);const item=set.items[quizQueues[mode].pop()];document.getElementById('quizLabel').textContent=set.label;document.getElementById('quizQuestion').textContent=item.q;const options=document.getElementById('quizOptions');const answer=document.getElementById('quizAnswer');const next=document.getElementById('quizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,optionIndex){const button=document.createElement('button');button.type='button';button.className='quiz-option';button.textContent=(item.options.length===4?(optionIndex+1)+'．':'')+label;button.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(b){b.disabled=true});answer.textContent=(optionIndex===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(button)});}
+document.getElementById('quizNext').addEventListener('click',prepareQuiz);
 function showLoading(){prepareQuiz();document.getElementById('loadingScreen').classList.add('show');}
-function showFetchedPage(html,url,startedAt){pendingPage={html:html,url:url,startedAt:startedAt};scheduleFetchedPage();}
-function runSearch(form){form.classList.add('loading');const submitBtn=form.querySelector('.btn');if(submitBtn)submitBtn.disabled=true;if(transitionTimer)clearTimeout(transitionTimer);pendingPage=null;showLoading();const params=new URLSearchParams(new FormData(form));const url='/?'+params.toString();const startedAt=Date.now();fetch(url,{headers:{'X-Fudo-Survey-Request':'async'}}).then(function(response){if(!response.ok)throw new Error('network');return response.text()}).then(function(html){showFetchedPage(html,url,startedAt)}).catch(function(){window.location.href=url});}
+function runSearch(form){form.classList.add('loading');const submitBtn=form.querySelector('.btn');if(submitBtn)submitBtn.disabled=true;showLoading();const params=new URLSearchParams(new FormData(form));const url='/?'+params.toString();fetch(url,{headers:{'X-Fudo-Survey-Request':'async'}}).then(function(response){if(!response.ok)throw new Error('network');return response.text()}).then(function(html){openFetchedPage(html,url)}).catch(function(){window.location.href=url});}
 document.getElementById('searchForm').addEventListener('submit',function(event){event.preventDefault();runSearch(this);});
 document.getElementById('locationBtn').addEventListener('click',function(){const btn=this;btn.disabled=true;btn.textContent='現在地を確認しています…';if(!navigator.geolocation){alert('この端末では現在地を取得できません。');btn.disabled=false;return}navigator.geolocation.getCurrentPosition(function(pos){const form=document.getElementById('searchForm');['lat','lon'].forEach(function(name){let el=form.querySelector('input[name="'+name+'"]');if(!el){el=document.createElement('input');el.type='hidden';el.name=name;form.appendChild(el)}el.value=name==='lat'?pos.coords.latitude:pos.coords.longitude});const addressInput=form.querySelector('.address');if(addressInput)addressInput.required=false;runSearch(form);},function(){alert('現在地を取得できませんでした。位置情報の利用を許可してください。');btn.disabled=false;btn.textContent='📍 現在地から調査';},{enableHighAccuracy:true,timeout:10000});});
 function calcLoan(){const amountEl=document.getElementById('loanAmount');if(!amountEl)return;const resultEl=document.getElementById('loanResult'),a=Number(amountEl.value)*10000,b=Number(document.getElementById('loanBonus').value)*10000,y=Number(document.getElementById('loanYears').value),rate=Number(document.getElementById('loanRate').value)/1200,n=y*12;if(!a||!y){resultEl.textContent='借入金額と返済期間を入力してください。';return}let bonusPV=0;for(let month=6;month<=n;month+=6){bonusPV+=b/Math.pow(1+rate,month)}if(bonusPV>=a){resultEl.textContent='ボーナス返済額が大きすぎます。金額を小さくしてください。';return}const monthlyPrincipal=a-bonusPV,pay=rate?monthlyPrincipal*rate*Math.pow(1+rate,n)/(Math.pow(1+rate,n)-1):monthlyPrincipal/n,total=pay*n+b*Math.floor(n/6),bonusMonth=pay+b;resultEl.innerHTML='毎月返済額　約 '+Math.round(pay).toLocaleString()+'円<br>ボーナス時返済額　約 '+Math.round(bonusMonth).toLocaleString()+'円 <span style="font-weight:400;font-size:12px">（年2回）</span><br>返済総額　約 '+Math.round(total).toLocaleString()+'円';}
