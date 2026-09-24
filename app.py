@@ -4,6 +4,7 @@ import requests
 import math
 import os
 import re
+import statistics
 from io import BytesIO
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,7 +12,40 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote_plus
 
 app = Flask(__name__)
-BUILD_VERSION = "preview16-20260921"
+BUILD_VERSION = "preview20-20260924"
+
+ACCESS_LOG_URL = "https://script.google.com/macros/s/AKfycbxEU_va8Lk20wCNtjbnivifTH8igfKpnyXI8QpEKCqb3Ythf6W9PuSbARlLqmBT0OP45Q/exec"
+STAFF_NAMES = {
+    "id03": "内藤さん",
+    "id04": "梅田さん",
+    "id05": "市岡さん",
+    "id06": "三浦さん",
+    "id07": "山下さん",
+    "id08": "山田悠さん",
+    "id09": "花澤さん",
+    "id10": "西川さん",
+}
+ACCESS_LOG_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+
+
+def send_access_log(staff_id, mode, event):
+    """調査画面を待たせないよう、Googleスプレッドシートへ非同期で記録する。"""
+    if not staff_id:
+        return
+    payload = {
+        "staffId": staff_id,
+        "staffName": STAFF_NAMES.get(staff_id, ""),
+        "mode": {"sales": "営業向け", "public": "一般向け", "internal": "プロ向け"}.get(mode, mode),
+        "event": event,
+    }
+
+    def post_log():
+        try:
+            requests.post(ACCESS_LOG_URL, json=payload, timeout=5)
+        except Exception as exc:
+            app.logger.warning("Access log failed: %s", exc)
+
+    ACCESS_LOG_EXECUTOR.submit(post_log)
 
 USE_AREA_DESCRIPTIONS = {
     "第一種低層住居専用地域": "低い住宅を中心とした、静かな住環境を守る地域です。大きなお店やホテルなどは、原則として建てられません。",
@@ -158,6 +192,75 @@ def get_api_features_neighborhood(api_code, x, y, zoom=15):
             if key not in seen:
                 seen.add(key); features.append(feature)
     return features
+
+def _number_from_japanese_price(value):
+    """「4,000万円」「180,000円/㎡」などの表示値を数値へ変換する。"""
+    text=str(value or "").replace(",", "").replace("，", "").strip()
+    match=re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
+    if not match:
+        return None
+    number=float(match.group(1))
+    if "億" in text: number*=100000000
+    elif "万" in text: number*=10000
+    return number
+
+def get_nearby_land_price_summary(lat, lon):
+    """国交省の土地取引情報から、周辺の参考単価を集計する。
+
+    XPT001の位置は個別物件そのものではなく最寄り駅の代表点なので、
+    査定値ではなく「周辺取引の参考値」としてのみ表示する。
+    """
+    api_key=os.environ.get("REINFOLIB_API_KEY", "").strip()
+    if not api_key:
+        return {"available":False,"message":"土地価格データを取得できませんでした。"}
+    now=datetime.now(timezone(timedelta(hours=9)))
+    current_quarter=(now.month-1)//3+1
+    start_year=now.year-3
+    zoom=14
+    x,y=latlon_to_tile(lat,lon,zoom)
+    try:
+        response=requests.get(
+            "https://www.reinfolib.mlit.go.jp/ex-api/external/XPT001",
+            headers={"Ocp-Apim-Subscription-Key":api_key},
+            params={
+                "response_format":"geojson","z":zoom,"x":x,"y":y,
+                "from":f"{start_year}1","to":f"{now.year}{current_quarter}",
+                "priceClassification":"01","landTypeCode":"01",
+            },
+            timeout=18,
+        )
+        response.raise_for_status()
+        features=(response.json() or {}).get("features") or []
+    except Exception:
+        return {"available":False,"message":"周辺の土地取引データを取得できませんでした。"}
+    unit_prices=[]
+    periods=[]
+    for feature in features:
+        p=feature.get("properties") or {}
+        unit=_number_from_japanese_price(p.get("u_transaction_price_unit_price_square_meter_ja") or p.get("UnitPrice") or p.get("unitPrice") or p.get("PricePerUnit"))
+        if not unit:
+            total=_number_from_japanese_price(p.get("u_transaction_price_total_ja") or p.get("TradePrice") or p.get("TransactionPrice") or p.get("tradePrice"))
+            area=_number_from_japanese_price(p.get("u_area_ja") or p.get("Area") or p.get("area"))
+            if total and area: unit=total/area
+        if unit and 1000<=unit<=10000000:
+            unit_prices.append(unit)
+            period=str(p.get("point_in_time_name_ja") or p.get("Period") or p.get("period") or "").strip()
+            if period: periods.append(period)
+    if not unit_prices:
+        return {"available":False,"message":"この周辺では、集計できる土地取引データが見つかりませんでした。"}
+    average=statistics.mean(unit_prices)
+    median=statistics.median(unit_prices)
+    sorted_prices=sorted(unit_prices)
+    low=sorted_prices[max(0,round((len(sorted_prices)-1)*0.25))]
+    high=sorted_prices[min(len(sorted_prices)-1,round((len(sorted_prices)-1)*0.75))]
+    return {
+        "available":True,"count":len(unit_prices),
+        "average_sqm":round(average),"median_sqm":round(median),
+        "average_tsubo":round(average*3.305785),"median_tsubo":round(median*3.305785),
+        "low_sqm":round(low),"high_sqm":round(high),
+        "period":f"{start_year}年～{now.year}年（取得可能な最新分まで）",
+        "scope":"調査地点を含む周辺地図範囲・最寄り駅代表点を基準",
+    }
 
 def get_nearby_evacuation_sites(lat, lon, limit_count=5):
     """国土地理院の指定緊急避難場所から、近い順に取得する。"""
@@ -745,17 +848,31 @@ def approximate_current_address(lat, lon):
         if not results:
             return None
         p=results[0]
-        parts=[]
-        for field in ("city","suburb","district","neighbourhood"):
-            value=str(p.get(field) or "").strip()
-            if value and value not in parts and not any(value in existing for existing in parts):
-                parts.append(value)
-        text="".join(parts)
-        if not text:
-            text=str(p.get("formatted") or "").strip()
-            text=re.sub(r"^(?:日本[、, ]*)?〒?\d{3}-?\d{4}[、, ]*", "", text)
-            text=re.sub(r"^[^都道府県]+[都道府県]", "", text)
-            text=text.split("、")[0].split(",")[0]
+
+        # Geoapifyの city だけを採用すると「名古屋市付近」で止まるため、
+        # 詳細な formatted/address_line1 を優先して区・町名・丁目を残す。
+        formatted=str(p.get("formatted") or "").strip()
+        text=formatted
+        if text:
+            text=re.sub(r"^(?:日本[、, ]*)?", "", text)
+            text=re.sub(r"〒?\d{3}-?\d{4}[、, ]*", "", text)
+            text=re.sub(r"(?:[、, ]*日本)$", "", text)
+            text=re.sub(r"\s+", "", text)
+            text=text.replace("、", "").replace(",", "")
+        if not text or len(text) < 5:
+            parts=[]
+            for field in ("state","city","suburb","district","quarter","neighbourhood","street","housenumber"):
+                value=str(p.get(field) or "").strip()
+                if value and value not in parts and not any(value in existing for existing in parts):
+                    parts.append(value)
+            text="".join(parts)
+        if (not text or text in {str(p.get("city") or "").strip(), str(p.get("state") or "").strip()}):
+            line1=str(p.get("address_line1") or "").strip()
+            line2=str(p.get("address_line2") or "").strip()
+            text="".join(v for v in (line2,line1) if v)
+            text=re.sub(r"(?:[、, ]*日本)$", "", text)
+            text=re.sub(r"〒?\d{3}-?\d{4}[、, ]*", "", text)
+            text=re.sub(r"\s+", "", text).replace("、", "").replace(",", "")
         # 番地・号は表示せず、丁目が含まれる場合は丁目までにする。
         chome=re.search(r"^(.+?\d+丁目)", text)
         if chome:
@@ -793,12 +910,14 @@ def perform_search(address, current_lat=None, current_lon=None, mode="sales"):
         stations_future=pool.submit(get_heartrails_stations,lat,lon)
         inland_future=pool.submit(get_inland_flood_status,lat,lon)
         evacuation_future=pool.submit(get_nearby_evacuation_sites,lat,lon)
+        land_price_future=pool.submit(get_nearby_land_price_summary,lat,lon) if mode!="public" else None
         for future in as_completed(futures):
             code,value=future.result(); codes[code]=value
         ef,es,_=school_e.result(); jf,js,_=school_j.result()
         nearby,shop_error=nearby_future.result(); drugs,drug_error=drugs_future.result()
         rail_stations=stations_future.result(); inland_flood=inland_future.result()
         evacuation_sites=evacuation_future.result()
+        land_price=land_price_future.result() if land_price_future else None
     em=find_matching_features(ef,lon,lat); jm=find_matching_features(jf,lon,lat)
 
     if drugs: nearby["drugstore"]=drugs
@@ -984,6 +1103,7 @@ def perform_search(address, current_lat=None, current_lon=None, mode="sales"):
         "history_map_url":f"https://maps.gsi.go.jp/#16/{lat}/{lon}/&base=std&ls=std&disp=1",
         "hazard_map_url":f"https://disaportal.gsi.go.jp/maps/?base=pale&ll={lat}%2C{lon}&z=15",
         "evacuation_sites":evacuation_sites,
+        "land_price":land_price,
         "legal_checks":[
             {"name":"景観法","status":"公開データでは判定できません","note":"自治体の景観計画・届出対象規模を確認"},
             {"name":"宅地造成及び特定盛土等規制法","status":"公開データでは判定できません","note":"大規模盛土造成地マップとは別制度。規制区域図と行為内容を確認"},
@@ -1023,12 +1143,16 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 .row{display:grid;grid-template-columns:128px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid #edf1f4}.row:last-child{border-bottom:0}.label{color:var(--muted);font-size:14px}.value{font-weight:600}.value.warn{color:var(--danger)}
 .desc{background:#f6f9fb;border-left:4px solid #8bb7d4;padding:10px 12px;border-radius:8px;line-height:1.7;font-size:14px}.facility{padding:10px 0;border-bottom:1px solid #edf1f4}.facility:last-child{border-bottom:0}.facility b{display:block;margin-bottom:4px}.meta{font-size:13px;color:var(--muted)}
 .notice{font-size:12px;line-height:1.65;color:var(--muted)}.error{background:#fff1f0;border:1px solid #ffd1cc;color:#8c2b20;padding:14px;border-radius:12px;margin:12px 0}.spinner{display:none;margin-left:8px}.loading .spinner{display:inline}.loading .btn{opacity:.7}.loading-screen{display:none;position:fixed;inset:0;background:#052f55ee;color:#fff;z-index:99;align-items:center;justify-content:center;text-align:center;padding:24px;overflow:auto;-webkit-overflow-scrolling:touch}.loading-screen.show{display:flex}.loading-panel{width:min(520px,100%)}.loader-logo{font-size:29px;font-weight:900;letter-spacing:.03em;line-height:1.35}.quiz{margin-top:20px;background:#fff;color:var(--ink);border-radius:16px;padding:18px;text-align:left}.quiz-label{font-size:12px;color:var(--accent2);font-weight:800}.quiz-question{font-weight:700;line-height:1.6;margin:7px 0 12px}.quiz-options{display:grid;gap:8px}.quiz-option{border:1px solid #bfd0dd;background:#f7fbfe;color:var(--ink);padding:12px;border-radius:10px;text-align:left;font-size:15px;min-height:44px;cursor:pointer;touch-action:manipulation;-webkit-appearance:none;appearance:none}.quiz-option:disabled{opacity:.75}.quiz-answer{display:none;margin-top:11px;background:var(--soft);padding:10px;border-radius:9px;line-height:1.55;font-size:13px}.quiz-answer.show{display:block}.quiz-next{display:none;width:100%;margin-top:10px;border:0;border-radius:10px;background:var(--accent2);color:#fff;padding:11px 14px;font-size:15px;font-weight:800;cursor:pointer;touch-action:manipulation}.quiz-next.show{display:block}.loan-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.loan-grid label{font-size:12px;color:var(--muted)}.loan-grid input{width:100%;margin-top:4px;padding:10px;border:1px solid #d7e0e7;border-radius:8px;font-size:16px}.loan-result{margin-top:12px;background:var(--soft);padding:12px;border-radius:10px;font-weight:700}.history-link{display:inline-block;margin-top:10px;color:var(--accent2);font-weight:700;text-decoration:none}.hazard-link{display:block;margin:14px 0 8px;padding:12px 14px;border-radius:10px;background:var(--accent2);color:#fff;text-align:center;font-weight:700;text-decoration:none}.site{padding:11px 0;border-bottom:1px solid #edf1f4}.site:last-child{border-bottom:0}.site a,.facility a,.row a{color:var(--accent2);font-weight:700;text-decoration:none}.law-links{display:grid;gap:5px;margin-top:6px}.law-links a{color:var(--accent2);font-size:12px;font-weight:700;text-decoration:none}footer{padding:12px 4px 32px;font-size:11px;color:#73808c;line-height:1.7}
-@media(max-width:600px){.brandbar{padding-top:env(safe-area-inset-top)}.brandwrap{padding:8px 10px!important}.brand{gap:10px}.brandmark{width:52px;height:52px;flex-basis:52px}.brandname{font-size:14px}.brand-title{font-size:22px}.brandline{font-size:12px;margin-top:7px;padding-top:6px}header{padding:9px 10px 14px}.wrap{padding:10px}form{display:block}.address{width:100%;margin-bottom:8px}.btn{width:100%;height:46px}.card{border-radius:12px;padding:15px;margin:10px 0}.row{grid-template-columns:1fr;gap:2px}.label{font-size:12px}.value{font-size:15px}.loan-grid{grid-template-columns:1fr}.quiz{padding:15px}}
+.menu-button{position:absolute;right:14px;top:14px;width:44px;height:44px;border:1px solid #ffffff88;border-radius:11px;background:#ffffff18;color:#fff;font-size:25px;line-height:1;cursor:pointer;z-index:9}.menu-panel{display:none;position:fixed;right:12px;top:68px;width:min(310px,calc(100vw - 24px));background:#fff;color:var(--ink);border-radius:14px;padding:9px;box-shadow:0 12px 40px #001b3555;z-index:101}.menu-panel.show{display:block}.menu-panel button,.menu-panel a{display:block;width:100%;border:0;border-bottom:1px solid #e8eef3;background:#fff;color:var(--accent);padding:13px 12px;text-align:left;text-decoration:none;font-size:15px;font-weight:750;cursor:pointer}.menu-panel>*:last-child{border-bottom:0}.modal-backdrop{display:none;position:fixed;inset:0;background:#001b35aa;z-index:100;align-items:center;justify-content:center;padding:16px}.modal-backdrop.show{display:flex}.modal{width:min(620px,100%);max-height:88vh;overflow:auto;background:#fff;color:var(--ink);border-radius:16px;padding:18px;box-shadow:0 18px 60px #0005}.modal-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.modal-head h2{margin:0;color:var(--accent);font-size:20px}.modal-close{border:0;background:var(--soft);color:var(--accent);border-radius:9px;width:40px;height:40px;font-size:21px}.quiz-course-buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:14px 0}.quiz-course-buttons button{border:1px solid #bfd0dd;background:#f7fbfe;color:var(--accent);border-radius:9px;padding:10px 6px;font-weight:800}.quiz-course-buttons button.active{background:var(--accent2);color:#fff}.land-price-main{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin:10px 0}.price-box{background:var(--soft);border-radius:10px;padding:12px}.price-box span{display:block;font-size:12px;color:var(--muted)}.price-box b{display:block;margin-top:4px;color:var(--accent);font-size:19px}.land-calc{margin-top:12px;border-top:1px solid #e5edf3;padding-top:12px}.land-calc-row{display:flex;gap:8px;align-items:end}.land-calc label{flex:1;font-size:12px;color:var(--muted)}.land-calc input{width:100%;margin-top:4px;padding:11px;border:1px solid #cbd8e2;border-radius:8px;font-size:16px}.land-calc button{border:0;border-radius:9px;background:var(--accent2);color:#fff;padding:12px 14px;font-weight:800}.land-result{margin-top:10px;background:#eaf5fc;padding:12px;border-radius:10px;font-weight:700;line-height:1.7}
+@media(max-width:600px){.brandbar{padding-top:env(safe-area-inset-top)}.brandwrap{padding:8px 62px 8px 10px!important}.brand{gap:10px}.brandmark{width:52px;height:52px;flex-basis:52px}.brandname{font-size:14px}.brand-title{font-size:22px}.brandline{font-size:12px;margin-top:7px;padding-top:6px}.menu-button{right:10px;top:calc(10px + env(safe-area-inset-top))}header{padding:9px 10px 14px}.wrap{padding:10px}form{display:block}.address{width:100%;margin-bottom:8px}.btn{width:100%;height:46px}.card{border-radius:12px;padding:15px;margin:10px 0}.row{grid-template-columns:1fr;gap:2px}.label{font-size:12px}.value{font-size:15px}.loan-grid,.land-price-main{grid-template-columns:1fr}.land-calc-row{display:block}.land-calc button{width:100%;margin-top:8px}.quiz-course-buttons{grid-template-columns:1fr}.quiz{padding:15px}}
 @media print{.brandbar{position:static;background:#fff;color:#123;box-shadow:none}header{background:#fff;color:#123;border-bottom:2px solid #0f4c81}.modebar,form,.location-btn,.tools,.loading-screen{display:none!important}.card{box-shadow:none;break-inside:avoid}.wrap{max-width:none}.notice{color:#4d5964}}
+.menu-button{position:fixed}
 </style>
 </head>
 <body>
 <div class="brandbar"><div class="wrap brandwrap"><div class="brand"><img class="brandmark" src="data:image/webp;base64,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" alt="笑顔の不動さん"><div class="brandtext"><div class="brandname">不動さんの</div><h1 class="brand-title">らくらく物件調査</h1></div></div><div class="brandline">住所を入れるだけで、土地・防災・暮らしの情報が分かります</div></div></div>
+<button type="button" class="menu-button" id="menuButton" aria-label="メニューを開く" aria-expanded="false">☰</button>
+<div class="menu-panel" id="menuPanel" aria-hidden="true"><button type="button" data-menu-action="guide">🔰 使い方</button><button type="button" data-menu-action="quiz">🧠 宅建・不動産クイズ</button><button type="button" data-menu-action="notice">📢 お知らせ</button><button type="button" data-menu-action="contact">✉ お問い合わせ</button><button type="button" data-menu-action="manga">📚 不動さんの日常</button></div>
 <header><div class="wrap" style="padding:0">
 <div class="modebar"><a class="mode {% if mode == 'sales' %}active{% endif %}" href="/?mode=sales{% if staff %}&staff={{ staff }}{% endif %}">営業向け</a><a class="mode {% if mode == 'public' %}active{% endif %}" href="/?mode=public{% if staff %}&staff={{ staff }}{% endif %}">一般向け</a><a class="mode {% if mode == 'internal' %}active{% endif %}" href="/?mode=internal{% if staff %}&staff={{ staff }}{% endif %}">プロ向け</a></div>
 <div class="scope">{{ '全国｜身近な防災確認' if mode == 'public' else ('名古屋圏とその周辺｜詳しい調査画面' if mode == 'internal' else '名古屋圏とその周辺｜営業現場向け') }}</div>
@@ -1061,6 +1185,11 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <div class="row"><div class="label">防火・準防火</div><div class="value {% if '準防火' in r.fire or '防火地域' in r.fire %}warn{% endif %}">{{ r.fire }}</div></div>
 <div class="notice">※「指定なし」は、防火地域・準防火地域の指定が公開データで確認できない場合の表示です。建築基準法第22条区域等は、自治体の最新情報をご確認ください。</div>
 </div>
+{% if mode != 'public' %}<div class="card"><h2>💴 周辺の土地価格（参考）</h2>
+{% if r.land_price and r.land_price.available %}<div class="land-price-main"><div class="price-box"><span>平均㎡単価</span><b>約 {{ "{:,}".format(r.land_price.average_sqm) }}円</b></div><div class="price-box"><span>中央値の㎡単価</span><b>約 {{ "{:,}".format(r.land_price.median_sqm) }}円</b></div><div class="price-box"><span>平均坪単価</span><b>約 {{ "{:,}".format(r.land_price.average_tsubo) }}円</b></div><div class="price-box"><span>中央値の坪単価</span><b>約 {{ "{:,}".format(r.land_price.median_tsubo) }}円</b></div></div>
+<div class="land-calc" data-price="{{ r.land_price.median_sqm }}" data-low="{{ r.land_price.low_sqm }}" data-high="{{ r.land_price.high_sqm }}"><b>土地面積から目安価格を計算</b><div class="land-calc-row"><label>土地面積（㎡）<input id="landArea" type="number" min="0" step="0.01" inputmode="decimal" placeholder="例：150"></label><button type="button" id="landCalcButton">目安価格を計算</button></div><div class="land-result" id="landPriceResult">土地面積を入力してください。</div></div>
+<div class="notice">集計：{{ r.land_price.period }}／{{ r.land_price.count }}件。{{ r.land_price.scope }}。成約事例を単純集計した参考値で、査定額・公示価格ではありません。個別条件や時期により価格は異なります。</div>
+{% else %}<div class="desc">周辺の取引価格データを取得できませんでした。</div><div class="notice">価格の確認には不動産情報ライブラリや公示地価等もあわせてご利用ください。</div>{% endif %}</div>{% endif %}
 <div class="card"><h2>🕰 土地の履歴（参考）</h2>
 <div class="desc">昔の地図や航空写真を見ると、この土地や周りが以前どのように使われていたかを確認できます。</div>
 <a class="history-link" href="{{ r.history_map_url }}" target="_blank" rel="noopener">国土地理院の地図で土地の成り立ちや昔の写真を見る ↗</a>
@@ -1111,8 +1240,8 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 {% for law in r.legal_checks %}<div class="row"><div class="label">{{ law.name }}</div><div><div class="value {% if '可能性' in law.status %}warn{% endif %}">{{ law.status }}</div><div class="notice">{{ law.note }}</div>{% if law.links %}<div class="law-links">{% for link in law.links %}<a href="{{ link.url }}" target="_blank" rel="noopener">{{ link.label }} ↗</a>{% endfor %}</div>{% endif %}</div></div>{% endfor %}
 </div>{% endif %}
 {% if mode != 'public' %}<div class="card"><h2>🏦 住宅ローン概算</h2>
-<div class="loan-grid"><label>借入金額（万円）<input id="loanAmount" type="number" value="3000" min="0"></label><label>年利（％）<input id="loanRate" type="number" value="1" min="0" step="0.01"></label><label>返済期間（年）<input id="loanYears" type="number" value="35" min="1"></label><label>ボーナス1回の返済額（万円・年2回）<input id="loanBonus" type="number" value="0" min="0" step="0.1"></label></div>
-<div class="loan-result" id="loanResult">入力すると毎月の返済額を概算表示します。</div><div class="notice">※元利均等返済による概算です。実際の返済額は金融機関の商品・金利・諸条件により異なります。</div>{% if mode == 'sales' %}<div class="notice" style="margin-top:6px">住宅購入とあわせて、現在のお借入れを見直せる場合があります。金融機関・商品・審査条件により取扱いは異なります。</div>{% endif %}</div>{% endif %}
+<div class="loan-grid"><label>借入金額（万円）<input id="loanAmount" type="number" value="3000" min="0" inputmode="decimal"></label><label>年利（％）<input id="loanRate" type="number" value="1" min="0" step="0.01" inputmode="decimal"></label><label>返済期間（年）<input id="loanYears" type="number" value="35" min="1" inputmode="numeric"></label><label>ボーナス1回の返済額（万円・年2回）<input id="loanBonus" type="number" value="0" min="0" step="0.1" inputmode="decimal"></label></div>
+<button type="button" class="toolbtn" id="loanCalcButton" style="width:100%;margin-top:10px">概算を計算</button><div class="loan-result" id="loanResult">計算中…</div><div class="notice">※元利均等返済による概算です。実際の返済額は金融機関の商品・金利・諸条件により異なります。</div>{% if mode == 'sales' %}<div class="notice" style="margin-top:6px">住宅購入とあわせて、現在のお借入れを見直せる場合があります。金融機関・商品・審査条件により取扱いは異なります。</div>{% endif %}</div>{% endif %}
 <div class="card"><h2>情報源・注意事項</h2><div class="notice">
 ・洪水：XKT026 ／ 内水：重ねるハザードマップ ／ 高潮：XKT027 ／ 津波：XKT028 ／ 土砂災害：XKT029<br>・指定緊急避難場所：国土地理院GISデータ（XGT001）<br>
 {% if mode != 'public' %}・用途地域等：不動産情報ライブラリ（国土交通省）<br>・防火・準防火：XKT014 ／ 居住誘導区域：XKT003<br>・地区計画：XKT023 ／ 大規模盛土造成地：XKT020<br>・地すべり防止区域：XKT021 ／ 急傾斜地崩壊危険区域：XKT022<br>・学区：不動産情報ライブラリの公開データを基本とし、岐阜市は公式通学区域規則準拠の全域補完（複雑な番地境界は要自治体確認）<br>・公開されている地図情報で判定できない場合は「指定なし」「区域外」と断定しません。<br>・契約・重要事項説明に使用する場合は、必ず最新の行政情報を確認してください。
@@ -1120,6 +1249,8 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 </div></div>{% endif %}
 <footer>東海三県（愛知・岐阜・三重）の営業利用を優先して整備中です。<br>コンビニ・スーパー：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI ／ 駅：HeartRails Express<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN<br>Developed by J. Toriuchi</footer>
 </main>
+<div class="modal-backdrop" id="infoModal" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle"><div class="modal-head"><h2 id="infoModalTitle"></h2><button type="button" class="modal-close" data-close-modal aria-label="閉じる">×</button></div><div id="infoModalContent" class="desc"></div></div></div>
+<div class="modal-backdrop" id="quizModal" aria-hidden="true"><div class="modal quiz-modal" role="dialog" aria-modal="true" aria-labelledby="menuQuizTitle"><div class="modal-head"><h2 id="menuQuizTitle">🧠 宅建・不動産クイズ</h2><button type="button" class="modal-close" data-close-modal aria-label="閉じる">×</button></div><div class="quiz-course-buttons"><button type="button" data-quiz-course="public">防災・一般</button><button type="button" data-quiz-course="sales">営業向け</button><button type="button" data-quiz-course="internal">プロ・激むず</button></div><div class="quiz-label" id="menuQuizLabel"></div><div class="quiz-question" id="menuQuizQuestion"></div><div class="quiz-options" id="menuQuizOptions"></div><div class="quiz-answer" id="menuQuizAnswer"></div><button type="button" class="quiz-next" id="menuQuizNext">次のクイズへ</button></div></div>
 <div class="loading-screen" id="loadingScreen"><div class="loading-panel"><div class="loader-logo">不動さんの<br>らくらく物件調査</div><div style="margin-top:10px">物件情報を調査しています。<br>そのまま少々お待ちください。</div><div class="quiz" id="quizBox"><div class="quiz-label" id="quizLabel"></div><div class="quiz-question" id="quizQuestion"></div><div class="quiz-options" id="quizOptions"></div><div class="quiz-answer" id="quizAnswer"></div><button type="button" class="quiz-next" id="quizNext">次のクイズへ</button></div></div></div>
 <script>
 const currentMode={{ mode|tojson }};
@@ -1232,17 +1363,44 @@ addFourText(quizSets.internal,`2項道路の反対側が川の場合に特に確
 借地権付き建物の取引で確認すべきものは？|土地賃貸借契約と譲渡承諾等~建物登記だけ~固定資産税だけ~用途地域だけ|0|地代、期間、更新条件、譲渡承諾等を確認します。
 越境に関する覚書で確認すべきものは？|対象・是正時期・承継条項等~署名の色だけ~作成日の曜日~仲介会社のロゴ|0|将来の是正方法と承継内容を明確にします。
 調査資料同士に矛盾がある場合の対応は？|都合のよい資料を採用~矛盾を明示し追加確認~平均値を使う~推測で埋める|1|根拠と相違点を記録し確認先へ追加照会します。`);
+addFourText(quizSets.internal,`建築工事におけるベンチマークについて、適切なものはどれか。|設計GLと必ず同じ高さに設定する~工事中に移動する可能性のある境界杭を優先して設定する~工事中に動かない安定した箇所に高さの基準点を設定する~建物完成後に初めて設定する|2|ベンチマークは工事中の高さの基準点です。移動・損傷しない安定した場所に設定します。覚え方は「BM＝動かない高さの基準」です。
+鉄筋コンクリート造の一般的な梁について、適切なものはどれか。|梁中央部では下側に生じる引張力に対応する鉄筋が重要となる~コンクリートは引張力に強く鉄筋は主に圧縮力を負担する~梁中央部では上側だけに鉄筋を配置すればよい~鉄筋とコンクリートは力学的な弱点を補い合わない|0|一般的な梁の中央部は下側に引張力が生じ、鉄筋がコンクリートの弱点を補います。覚え方は「中央は下、端部は上」です。
+ラーメン構造について、適切なものはどれか。|柱と梁を剛接合した骨組みによって荷重や地震力などに抵抗する構造である~耐力壁だけで構成され柱と梁を用いない~鉄筋コンクリート造では採用できない~柱と梁の接合部を自由に回転できるようにする構造である|0|ラーメン構造は柱と梁を剛接合した骨組みで抵抗する構造です。材料の分類とは別の、支え方の分類です。
+エンジニアリング・レポートについて、適切なものはどれか。|建物の現況だけを調査し将来必要となる修繕費用は対象としない~建物の物理的状況などを調査し修繕・更新費用の見通しも検討する~土地の所有権移転登記だけを調査する~建築確認が済んでいる建物には作成できない|1|ERは建物の劣化状況や法令適合性等を技術的に調査し、将来の修繕・更新費用も検討します。建物の健康診断と将来の修繕費です。
+一定規模以上の建築物の解体等における石綿の事前調査について、適切なものはどれか。|石綿含有建材が確認された場合だけ調査結果を報告する~石綿がなければ事前調査自体が不要となる~対象工事では石綿がないという調査結果も報告する~事前調査は建物完成後に行う|2|対象となる一定規模以上の工事では、石綿の有無にかかわらず事前調査結果を報告します。「ありませんでした」も調査結果です。
+造成地・擁壁について、適切なものはどれか。|平坦なら谷埋め盛土でも地盤変動を考慮しなくてよい~高さ2m以下の擁壁は安全性調査が不要となる~L型擁壁の背面の埋戻し土は適切に施工しても造成後の沈下等に注意する~低い擁壁ならひび割れを確認する必要はない|2|擁壁背面の埋戻し土は、時間の経過による沈下等に注意が必要です。「平ら＝安全」「規制対象外＝安全」ではありません。
+外壁のチョーキングについて、適切なものはどれか。|塗膜の劣化などにより表面に粉状物が生じる現象である~建物内部への雨水浸入を直接証明する現象である~鉄筋が必ず腐食していることを示す~外壁表面を触っても確認できない|0|チョーキングは外壁の塗膜が劣化し、触ると白い粉などが付着する現象です。これだけで雨漏りや鉄筋腐食は断定できません。
+シーリング材のダンベル物性試験について、適切なものはどれか。|採取した試料などを用いて引張特性等の物性を調べる~地盤支持力だけを測る~コンクリート内部の鉄筋位置だけを確認する~外壁の色だけを目視判定する|0|試料をダンベル状の試験片にして引っ張り、引張特性などから材料の劣化状態を評価します。
+進行している構造上重要なコンクリートのひび割れへの対応として、最も適切なものはどれか。|原因等を確認せず表面にシーリング材を充填すれば十分~雨水が入らなければ進行状況の確認は不要~原因や進行性、構造安全性を調査し適切な補修方法を検討する~幅にかかわらず塗装だけで補修する|2|原因、進行性、構造安全性を確認し、その原因に応じた対策を行います。「雨を止めること」と「原因を直すこと」は別です。
+プレキャストコンクリート工法について、適切なものはどれか。|すべてのコンクリートを必ず現場で打設する~壁・床などの部材をあらかじめ工場等で製作し現場で組み立てる~現場打ちより必ず天候の影響を大きく受ける~工場製作部材は現場で使用できない|1|壁や床などの部材を工場等で製作し、現場へ運んで組み立てます。品質管理や現場作業の削減に利点があります。`);
 const quizQueues={};
 function refillQuizQueue(mode,count){const queue=Array.from({length:count},function(_,i){return i});for(let i=queue.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=queue[i];queue[i]=queue[j];queue[j]=t}quizQueues[mode]=queue;}
 function openFetchedPage(html,url){history.replaceState(null,'',url);document.open();document.write(html);document.close();}
 function prepareQuiz(){const mode=quizSets[currentMode]?currentMode:'sales';const set=quizSets[mode];if(!quizQueues[mode]||!quizQueues[mode].length)refillQuizQueue(mode,set.items.length);const item=set.items[quizQueues[mode].pop()];document.getElementById('quizLabel').textContent=set.label;document.getElementById('quizQuestion').textContent=item.q;const options=document.getElementById('quizOptions');const answer=document.getElementById('quizAnswer');const next=document.getElementById('quizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,optionIndex){const button=document.createElement('button');button.type='button';button.className='quiz-option';button.textContent=(item.options.length===4?(optionIndex+1)+'．':'')+label;button.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(b){b.disabled=true});answer.textContent=(optionIndex===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(button)});}
 document.getElementById('quizNext').addEventListener('click',prepareQuiz);
 function showLoading(){prepareQuiz();document.getElementById('loadingScreen').classList.add('show');}
-function runSearch(form){form.classList.add('loading');const submitBtn=form.querySelector('.btn');if(submitBtn)submitBtn.disabled=true;showLoading();const params=new URLSearchParams(new FormData(form));const url='/?'+params.toString();fetch(url,{headers:{'X-Fudo-Survey-Request':'async'}}).then(function(response){if(!response.ok)throw new Error('network');return response.text()}).then(function(html){openFetchedPage(html,url)}).catch(function(){window.location.href=url});}
+function runSearch(form){form.classList.add('loading');const submitBtn=form.querySelector('.btn');if(submitBtn)submitBtn.disabled=true;showLoading();const params=new URLSearchParams(new FormData(form));const url='/?'+params.toString();window.location.href=url;}
 document.getElementById('searchForm').addEventListener('submit',function(event){event.preventDefault();runSearch(this);});
 document.getElementById('locationBtn').addEventListener('click',function(){const btn=this;btn.disabled=true;btn.textContent='現在地を確認しています…';if(!navigator.geolocation){alert('この端末では現在地を取得できません。');btn.disabled=false;return}navigator.geolocation.getCurrentPosition(function(pos){const form=document.getElementById('searchForm');['lat','lon'].forEach(function(name){let el=form.querySelector('input[name="'+name+'"]');if(!el){el=document.createElement('input');el.type='hidden';el.name=name;form.appendChild(el)}el.value=name==='lat'?pos.coords.latitude:pos.coords.longitude});const addressInput=form.querySelector('.address');if(addressInput)addressInput.required=false;runSearch(form);},function(){alert('現在地を取得できませんでした。位置情報の利用を許可してください。');btn.disabled=false;btn.textContent='📍 現在地から調査';},{enableHighAccuracy:true,timeout:10000});});
 function calcLoan(){const amountEl=document.getElementById('loanAmount');if(!amountEl)return;const resultEl=document.getElementById('loanResult'),a=Number(amountEl.value)*10000,b=Number(document.getElementById('loanBonus').value)*10000,y=Number(document.getElementById('loanYears').value),rate=Number(document.getElementById('loanRate').value)/1200,n=y*12;if(!a||!y){resultEl.textContent='借入金額と返済期間を入力してください。';return}let bonusPV=0;for(let month=6;month<=n;month+=6){bonusPV+=b/Math.pow(1+rate,month)}if(bonusPV>=a){resultEl.textContent='ボーナス返済額が大きすぎます。金額を小さくしてください。';return}const monthlyPrincipal=a-bonusPV,pay=rate?monthlyPrincipal*rate*Math.pow(1+rate,n)/(Math.pow(1+rate,n)-1):monthlyPrincipal/n,total=pay*n+b*Math.floor(n/6),bonusMonth=pay+b;resultEl.innerHTML='毎月返済額　約 '+Math.round(pay).toLocaleString()+'円<br>ボーナス時返済額　約 '+Math.round(bonusMonth).toLocaleString()+'円 <span style="font-weight:400;font-size:12px">（年2回）</span><br>返済総額　約 '+Math.round(total).toLocaleString()+'円';}
-['loanAmount','loanRate','loanYears','loanBonus'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('input',calcLoan)});calcLoan();
+['loanAmount','loanRate','loanYears','loanBonus'].forEach(function(id){const el=document.getElementById(id);if(el){el.addEventListener('input',calcLoan);el.addEventListener('change',calcLoan)}});const loanCalcButton=document.getElementById('loanCalcButton');if(loanCalcButton)loanCalcButton.addEventListener('click',calcLoan);calcLoan();
+const landCalc=document.querySelector('.land-calc');
+function calcLandPrice(){if(!landCalc)return;const area=Number(document.getElementById('landArea').value),result=document.getElementById('landPriceResult');if(!area||area<=0){result.textContent='土地面積を入力してください。';return}const center=area*Number(landCalc.dataset.price),low=area*Number(landCalc.dataset.low),high=area*Number(landCalc.dataset.high),tsubo=area/3.305785;const man=function(yen){return Math.round(yen/10000).toLocaleString()+'万円'};result.innerHTML='面積　約 '+tsubo.toFixed(1)+'坪<br>目安価格　約 '+man(center)+'<br><span style="font-weight:400;font-size:12px">参考範囲：約 '+man(low)+' ～ '+man(high)+'</span>';}
+if(landCalc){document.getElementById('landCalcButton').addEventListener('click',calcLandPrice);document.getElementById('landArea').addEventListener('input',calcLandPrice)}
+const menuButton=document.getElementById('menuButton'),menuPanel=document.getElementById('menuPanel'),infoModal=document.getElementById('infoModal'),quizModal=document.getElementById('quizModal');
+function closeMenu(){menuPanel.classList.remove('show');menuPanel.setAttribute('aria-hidden','true');menuButton.setAttribute('aria-expanded','false')}
+function openModal(modal){closeMenu();modal.classList.add('show');modal.setAttribute('aria-hidden','false')}
+function closeModal(modal){modal.classList.remove('show');modal.setAttribute('aria-hidden','true')}
+menuButton.addEventListener('click',function(event){event.stopPropagation();const open=!menuPanel.classList.contains('show');menuPanel.classList.toggle('show',open);menuPanel.setAttribute('aria-hidden',String(!open));menuButton.setAttribute('aria-expanded',String(open))});
+document.addEventListener('click',function(event){if(!menuPanel.contains(event.target)&&event.target!==menuButton)closeMenu()});
+document.querySelectorAll('[data-close-modal]').forEach(function(button){button.addEventListener('click',function(){closeModal(button.closest('.modal-backdrop'))})});
+document.querySelectorAll('.modal-backdrop').forEach(function(backdrop){backdrop.addEventListener('click',function(event){if(event.target===backdrop)closeModal(backdrop)})});
+function showInfo(title,html){document.getElementById('infoModalTitle').textContent=title;document.getElementById('infoModalContent').innerHTML=html;openModal(infoModal)}
+document.querySelectorAll('[data-menu-action]').forEach(function(button){button.addEventListener('click',function(){const action=button.dataset.menuAction;if(action==='guide'){closeMenu();quickGuide.open=true;quickGuide.scrollIntoView({behavior:'smooth',block:'start'})}else if(action==='quiz'){openModal(quizModal);prepareMenuQuiz()}else if(action==='notice'){showInfo('📢 お知らせ','<b>新しい機能を追加しました。</b><br>メニューからいつでもクイズに挑戦できます。営業向け・プロ向けでは、周辺の土地価格と土地面積からの目安価格も確認できます。')}else if(action==='contact'){showInfo('✉ お問い合わせ','お問い合わせ窓口は準備中です。公開後、この画面からご案内します。')}else{showInfo('📚 不動さんの日常','「不動さんの日常」は準備中です。公開まで少々お待ちください。')}})});
+let menuQuizMode=quizSets[currentMode]?currentMode:'sales';const menuQuizQueues={};
+function prepareMenuQuiz(){const set=quizSets[menuQuizMode];if(!menuQuizQueues[menuQuizMode]||!menuQuizQueues[menuQuizMode].length){const q=Array.from({length:set.items.length},function(_,i){return i});for(let i=q.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=q[i];q[i]=q[j];q[j]=t}menuQuizQueues[menuQuizMode]=q}const item=set.items[menuQuizQueues[menuQuizMode].pop()];document.querySelectorAll('[data-quiz-course]').forEach(function(b){b.classList.toggle('active',b.dataset.quizCourse===menuQuizMode)});document.getElementById('menuQuizLabel').textContent=set.label;document.getElementById('menuQuizQuestion').textContent=item.q;const options=document.getElementById('menuQuizOptions'),answer=document.getElementById('menuQuizAnswer'),next=document.getElementById('menuQuizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,index){const b=document.createElement('button');b.type='button';b.className='quiz-option';b.textContent=(item.options.length===4?(index+1)+'．':'')+label;b.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(x){x.disabled=true});answer.textContent=(index===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(b)})}
+document.querySelectorAll('[data-quiz-course]').forEach(function(button){button.addEventListener('click',function(){menuQuizMode=button.dataset.quizCourse;prepareMenuQuiz()})});document.getElementById('menuQuizNext').addEventListener('click',prepareMenuQuiz);
+document.addEventListener('keydown',function(event){if(event.key==='Escape'){closeMenu();document.querySelectorAll('.modal-backdrop.show').forEach(closeModal)}});
 </script>
 </body></html>'''
 
@@ -1254,9 +1412,10 @@ def index():
     mode=(request.args.get("mode") or "sales").strip()
     if mode not in ("sales","public","internal"): mode="sales"
     staff=(request.args.get("staff") or "").strip().lower()
-    if staff not in ("id01","id02"): staff=""
+    if staff not in tuple("id%02d" % number for number in range(1, 11)): staff=""
     if staff:
         app.logger.info("Fudo survey access staff=%s mode=%s search=%s",staff,mode,bool(address or (current_lat and current_lon)))
+        send_access_log(staff, mode, "住所調査" if (address or (current_lat and current_lon)) else "ページ閲覧")
     result=None; error=None
     if address or (current_lat and current_lon):
         try: result=perform_search(address,current_lat,current_lon,mode=mode)
