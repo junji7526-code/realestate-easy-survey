@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote_plus
 
 app = Flask(__name__)
-BUILD_VERSION = "preview22-20260925"
+BUILD_VERSION = "preview23-20260925"
 
 ACCESS_LOG_URL = "https://script.google.com/macros/s/AKfycbxEU_va8Lk20wCNtjbnivifTH8igfKpnyXI8QpEKCqb3Ythf6W9PuSbARlLqmBT0OP45Q/exec"
 STAFF_NAMES = {
@@ -463,7 +463,7 @@ def _expand_area_candidates(area_text):
             out.append((f"{stem}{m3.group(2)}丁目", bool(tail)))
             continue
         # 番地条件付きの町名
-        m4=re.match(r'^(.+?)(?:\\(|（)?[0-9,]+番',p)
+        m4=re.match(r'^(.+?)(?:\(|（)?[0-9,]+番',p)
         if m4:
             out.append((m4.group(1), True)); stem=None; continue
         # 字表記などは町名部分ごと候補にする
@@ -1408,7 +1408,7 @@ externalInternalQuestions.forEach(function(item){
 });
 const quizQueues={};
 function refillQuizQueue(mode,count){const queue=Array.from({length:count},function(_,i){return i});for(let i=queue.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=queue[i];queue[i]=queue[j];queue[j]=t}quizQueues[mode]=queue;}
-function openFetchedPage(html,url){window.location.replace(url);}
+function openFetchedPage(html,url){window.history.replaceState(null,'',url);document.open();document.write(html);document.close();}
 function prepareQuiz(){const mode=quizSets[currentMode]?currentMode:'sales';const set=quizSets[mode];if(!quizQueues[mode]||!quizQueues[mode].length)refillQuizQueue(mode,set.items.length);const item=set.items[quizQueues[mode].pop()];document.getElementById('quizLabel').textContent=set.label;document.getElementById('quizQuestion').textContent=item.q;const options=document.getElementById('quizOptions');const answer=document.getElementById('quizAnswer');const next=document.getElementById('quizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,optionIndex){const button=document.createElement('button');button.type='button';button.className='quiz-option';button.textContent=(item.options.length===4?(optionIndex+1)+'．':'')+label;button.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(b){b.disabled=true});answer.textContent=(optionIndex===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(button)});}
 document.getElementById('quizNext').addEventListener('click',prepareQuiz);
 function showLoading(){prepareQuiz();document.getElementById('loadingScreen').classList.add('show');}
