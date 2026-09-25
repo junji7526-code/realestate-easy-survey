@@ -4,6 +4,7 @@ import requests
 import math
 import os
 import re
+import json
 import statistics
 from io import BytesIO
 from PIL import Image
@@ -12,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote_plus
 
 app = Flask(__name__)
-BUILD_VERSION = "preview20-20260924"
+BUILD_VERSION = "preview22-20260925"
 
 ACCESS_LOG_URL = "https://script.google.com/macros/s/AKfycbxEU_va8Lk20wCNtjbnivifTH8igfKpnyXI8QpEKCqb3Ythf6W9PuSbARlLqmBT0OP45Q/exec"
 STAFF_NAMES = {
@@ -24,8 +25,30 @@ STAFF_NAMES = {
     "id08": "山田悠さん",
     "id09": "花澤さん",
     "id10": "西川さん",
+    "id11": "柿原さん",
+    "id12": "山田大さん",
 }
 ACCESS_LOG_EXECUTOR = ThreadPoolExecutor(max_workers=2)
+
+
+def load_ota_quiz_questions():
+    """太田さん用の追加問題を外部JSONからまとめて読み込む。"""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    filenames = ("ota_quiz_building_01.json", "ota_quiz_urban_planning_02.json")
+    questions = []
+    for filename in filenames:
+        path = os.path.join(base_dir, filename)
+        try:
+            with open(path, "r", encoding="utf-8") as quiz_file:
+                data = json.load(quiz_file)
+            loaded = [q for q in data.get("questions", []) if isinstance(q, dict)]
+            # 建築編の最初の10問は本体にも収録済みのため、重複表示を避ける。
+            if filename == "ota_quiz_building_01.json":
+                loaded = loaded[10:]
+            questions.extend(loaded)
+        except Exception as exc:
+            app.logger.warning("Ota quiz file could not be loaded (%s): %s", filename, exc)
+    return questions
 
 
 def send_access_log(staff_id, mode, event):
@@ -1373,13 +1396,23 @@ addFourText(quizSets.internal,`建築工事におけるベンチマークにつ�
 シーリング材のダンベル物性試験について、適切なものはどれか。|採取した試料などを用いて引張特性等の物性を調べる~地盤支持力だけを測る~コンクリート内部の鉄筋位置だけを確認する~外壁の色だけを目視判定する|0|試料をダンベル状の試験片にして引っ張り、引張特性などから材料の劣化状態を評価します。
 進行している構造上重要なコンクリートのひび割れへの対応として、最も適切なものはどれか。|原因等を確認せず表面にシーリング材を充填すれば十分~雨水が入らなければ進行状況の確認は不要~原因や進行性、構造安全性を調査し適切な補修方法を検討する~幅にかかわらず塗装だけで補修する|2|原因、進行性、構造安全性を確認し、その原因に応じた対策を行います。「雨を止めること」と「原因を直すこと」は別です。
 プレキャストコンクリート工法について、適切なものはどれか。|すべてのコンクリートを必ず現場で打設する~壁・床などの部材をあらかじめ工場等で製作し現場で組み立てる~現場打ちより必ず天候の影響を大きく受ける~工場製作部材は現場で使用できない|1|壁や床などの部材を工場等で製作し、現場へ運んで組み立てます。品質管理や現場作業の削減に利点があります。`);
+const externalInternalQuestions={{ ota_quiz_questions|tojson }};
+externalInternalQuestions.forEach(function(item){
+  if(!item.question||!Array.isArray(item.choices)||item.choices.length!==4)return;
+  if(quizSets.internal.items.some(function(existing){return existing.q===item.question}))return;
+  const correct=Number(item.correct)-1;
+  if(correct<0||correct>3)return;
+  let explanation=String(item.explanation||'');
+  if(item.memory_tip)explanation+=' 覚え方：'+String(item.memory_tip);
+  quizSets.internal.items.push({q:String(item.question),options:item.choices.map(String),correct:correct,explanation:explanation});
+});
 const quizQueues={};
 function refillQuizQueue(mode,count){const queue=Array.from({length:count},function(_,i){return i});for(let i=queue.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=queue[i];queue[i]=queue[j];queue[j]=t}quizQueues[mode]=queue;}
-function openFetchedPage(html,url){history.replaceState(null,'',url);document.open();document.write(html);document.close();}
+function openFetchedPage(html,url){window.location.replace(url);}
 function prepareQuiz(){const mode=quizSets[currentMode]?currentMode:'sales';const set=quizSets[mode];if(!quizQueues[mode]||!quizQueues[mode].length)refillQuizQueue(mode,set.items.length);const item=set.items[quizQueues[mode].pop()];document.getElementById('quizLabel').textContent=set.label;document.getElementById('quizQuestion').textContent=item.q;const options=document.getElementById('quizOptions');const answer=document.getElementById('quizAnswer');const next=document.getElementById('quizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,optionIndex){const button=document.createElement('button');button.type='button';button.className='quiz-option';button.textContent=(item.options.length===4?(optionIndex+1)+'．':'')+label;button.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(b){b.disabled=true});answer.textContent=(optionIndex===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(button)});}
 document.getElementById('quizNext').addEventListener('click',prepareQuiz);
 function showLoading(){prepareQuiz();document.getElementById('loadingScreen').classList.add('show');}
-function runSearch(form){form.classList.add('loading');const submitBtn=form.querySelector('.btn');if(submitBtn)submitBtn.disabled=true;showLoading();const params=new URLSearchParams(new FormData(form));const url='/?'+params.toString();window.location.href=url;}
+function runSearch(form){form.classList.add('loading');const submitBtn=form.querySelector('.btn');if(submitBtn)submitBtn.disabled=true;showLoading();const params=new URLSearchParams(new FormData(form));const url='/?'+params.toString();fetch(url,{headers:{'X-Fudo-Survey-Request':'async'},cache:'no-store'}).then(function(response){if(!response.ok)throw new Error('network');return response.text()}).then(function(html){openFetchedPage(html,url)}).catch(function(){window.location.href=url});}
 document.getElementById('searchForm').addEventListener('submit',function(event){event.preventDefault();runSearch(this);});
 document.getElementById('locationBtn').addEventListener('click',function(){const btn=this;btn.disabled=true;btn.textContent='現在地を確認しています…';if(!navigator.geolocation){alert('この端末では現在地を取得できません。');btn.disabled=false;return}navigator.geolocation.getCurrentPosition(function(pos){const form=document.getElementById('searchForm');['lat','lon'].forEach(function(name){let el=form.querySelector('input[name="'+name+'"]');if(!el){el=document.createElement('input');el.type='hidden';el.name=name;form.appendChild(el)}el.value=name==='lat'?pos.coords.latitude:pos.coords.longitude});const addressInput=form.querySelector('.address');if(addressInput)addressInput.required=false;runSearch(form);},function(){alert('現在地を取得できませんでした。位置情報の利用を許可してください。');btn.disabled=false;btn.textContent='📍 現在地から調査';},{enableHighAccuracy:true,timeout:10000});});
 function calcLoan(){const amountEl=document.getElementById('loanAmount');if(!amountEl)return;const resultEl=document.getElementById('loanResult'),a=Number(amountEl.value)*10000,b=Number(document.getElementById('loanBonus').value)*10000,y=Number(document.getElementById('loanYears').value),rate=Number(document.getElementById('loanRate').value)/1200,n=y*12;if(!a||!y){resultEl.textContent='借入金額と返済期間を入力してください。';return}let bonusPV=0;for(let month=6;month<=n;month+=6){bonusPV+=b/Math.pow(1+rate,month)}if(bonusPV>=a){resultEl.textContent='ボーナス返済額が大きすぎます。金額を小さくしてください。';return}const monthlyPrincipal=a-bonusPV,pay=rate?monthlyPrincipal*rate*Math.pow(1+rate,n)/(Math.pow(1+rate,n)-1):monthlyPrincipal/n,total=pay*n+b*Math.floor(n/6),bonusMonth=pay+b;resultEl.innerHTML='毎月返済額　約 '+Math.round(pay).toLocaleString()+'円<br>ボーナス時返済額　約 '+Math.round(bonusMonth).toLocaleString()+'円 <span style="font-weight:400;font-size:12px">（年2回）</span><br>返済総額　約 '+Math.round(total).toLocaleString()+'円';}
@@ -1412,7 +1445,7 @@ def index():
     mode=(request.args.get("mode") or "sales").strip()
     if mode not in ("sales","public","internal"): mode="sales"
     staff=(request.args.get("staff") or "").strip().lower()
-    if staff not in tuple("id%02d" % number for number in range(1, 11)): staff=""
+    if staff not in tuple("id%02d" % number for number in range(1, 13)): staff=""
     if staff:
         app.logger.info("Fudo survey access staff=%s mode=%s search=%s",staff,mode,bool(address or (current_lat and current_lon)))
         send_access_log(staff, mode, "住所調査" if (address or (current_lat and current_lon)) else "ページ閲覧")
@@ -1420,7 +1453,16 @@ def index():
     if address or (current_lat and current_lon):
         try: result=perform_search(address,current_lat,current_lon,mode=mode)
         except Exception as e: error=str(e)
-    return render_template_string(HTML,address=address,r=result,error=error,build_version=BUILD_VERSION,mode=mode,staff=staff)
+    return render_template_string(
+        HTML,
+        address=address,
+        r=result,
+        error=error,
+        build_version=BUILD_VERSION,
+        mode=mode,
+        staff=staff,
+        ota_quiz_questions=load_ota_quiz_questions(),
+    )
 
 if __name__=="__main__":
     print("不動さんのらくらく物件調査 Web版")
