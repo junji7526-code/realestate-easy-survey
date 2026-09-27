@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote_plus
 
 app = Flask(__name__)
-BUILD_VERSION = "preview23-20260925"
+BUILD_VERSION = "preview24-20260926"
 
 ACCESS_LOG_URL = "https://script.google.com/macros/s/AKfycbxEU_va8Lk20wCNtjbnivifTH8igfKpnyXI8QpEKCqb3Ythf6W9PuSbARlLqmBT0OP45Q/exec"
 STAFF_NAMES = {
@@ -907,15 +907,39 @@ def approximate_current_address(lat, lon):
         return None
 
 def perform_search(address, current_lat=None, current_lon=None, mode="sales"):
+    geocode_note=None
     if current_lat is not None and current_lon is not None:
         lat,lon=float(current_lat),float(current_lon)
         approximate=approximate_current_address(lat,lon)
         display_address=f"現在地（推定）：{approximate}" if approximate else "現在地（推定住所を取得できません）"
     else:
-        geo=requests.get("https://msearch.gsi.go.jp/address-search/AddressSearch",params={"q":address},timeout=10)
-        geo.raise_for_status(); gd=geo.json()
-        if not gd: raise ValueError("住所が見つかりませんでした。住所を少し短くしてお試しください。")
-        lon,lat=gd[0]["geometry"]["coordinates"]
+        try:
+            geo=requests.get("https://msearch.gsi.go.jp/address-search/AddressSearch",params={"q":address},timeout=8)
+            geo.raise_for_status(); gd=geo.json()
+        except requests.RequestException:
+            try:
+                key=os.environ.get("GEOAPIFY_API_KEY","").strip()
+                if not key: raise ValueError("住所検索サービスが混み合っています。少し時間をおいて再度お試しください。")
+                alternative=requests.get(
+                    "https://api.geoapify.com/v1/geocode/search",
+                    params={"text":address,"filter":"countrycode:jp","lang":"ja","format":"json","limit":1,"apiKey":key},
+                    timeout=10,
+                )
+                alternative.raise_for_status()
+                candidates=(alternative.json() or {}).get("results") or []
+                candidate=candidates[0] if candidates else {}
+                rank=candidate.get("rank") or {}
+                if (float(rank.get("confidence") or 0)<0.9 or rank.get("match_type") not in ("full_match","match_by_building")
+                    or candidate.get("country_code")!="jp"):
+                    raise ValueError("住所の位置を正確に確認できませんでした。住所を少し短くするか、時間をおいて再度お試しください。")
+                lon,lat=float(candidate["lon"]),float(candidate["lat"])
+                geocode_note=f"別の住所検索サービスで位置を取得しました：{candidate.get('formatted') or address}。地図上の位置を必ず確認してください。"
+            except (requests.RequestException, KeyError, TypeError, ValueError) as exc:
+                if isinstance(exc,ValueError) and str(exc).startswith("住所の位置を正確に"): raise
+                raise ValueError("住所検索サービスに接続できません。少し時間をおいて再度お試しください。") from exc
+        else:
+            if not gd: raise ValueError("住所が見つかりませんでした。住所を少し短くしてお試しください。")
+            lon,lat=gd[0]["geometry"]["coordinates"]
         display_address=address
     x,y=latlon_to_tile(lat,lon,15)
 
@@ -1097,6 +1121,7 @@ def perform_search(address, current_lat=None, current_lon=None, mode="sales"):
 
     return {
         "address":display_address,
+        "geocode_note":geocode_note,
         "is_current_location":current_lat is not None and current_lon is not None,
         "searched_at":datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M"),
         "area_names":area_names or ["該当データなし"],
@@ -1169,7 +1194,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 .menu-button{position:absolute;right:14px;top:14px;width:44px;height:44px;border:1px solid #ffffff88;border-radius:11px;background:#ffffff18;color:#fff;font-size:25px;line-height:1;cursor:pointer;z-index:9}.menu-panel{display:none;position:fixed;right:12px;top:68px;width:min(310px,calc(100vw - 24px));background:#fff;color:var(--ink);border-radius:14px;padding:9px;box-shadow:0 12px 40px #001b3555;z-index:101}.menu-panel.show{display:block}.menu-panel button,.menu-panel a{display:block;width:100%;border:0;border-bottom:1px solid #e8eef3;background:#fff;color:var(--accent);padding:13px 12px;text-align:left;text-decoration:none;font-size:15px;font-weight:750;cursor:pointer}.menu-panel>*:last-child{border-bottom:0}.modal-backdrop{display:none;position:fixed;inset:0;background:#001b35aa;z-index:100;align-items:center;justify-content:center;padding:16px}.modal-backdrop.show{display:flex}.modal{width:min(620px,100%);max-height:88vh;overflow:auto;background:#fff;color:var(--ink);border-radius:16px;padding:18px;box-shadow:0 18px 60px #0005}.modal-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.modal-head h2{margin:0;color:var(--accent);font-size:20px}.modal-close{border:0;background:var(--soft);color:var(--accent);border-radius:9px;width:40px;height:40px;font-size:21px}.quiz-course-buttons{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:14px 0}.quiz-course-buttons button{border:1px solid #bfd0dd;background:#f7fbfe;color:var(--accent);border-radius:9px;padding:10px 6px;font-weight:800}.quiz-course-buttons button.active{background:var(--accent2);color:#fff}.land-price-main{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin:10px 0}.price-box{background:var(--soft);border-radius:10px;padding:12px}.price-box span{display:block;font-size:12px;color:var(--muted)}.price-box b{display:block;margin-top:4px;color:var(--accent);font-size:19px}.land-calc{margin-top:12px;border-top:1px solid #e5edf3;padding-top:12px}.land-calc-row{display:flex;gap:8px;align-items:end}.land-calc label{flex:1;font-size:12px;color:var(--muted)}.land-calc input{width:100%;margin-top:4px;padding:11px;border:1px solid #cbd8e2;border-radius:8px;font-size:16px}.land-calc button{border:0;border-radius:9px;background:var(--accent2);color:#fff;padding:12px 14px;font-weight:800}.land-result{margin-top:10px;background:#eaf5fc;padding:12px;border-radius:10px;font-weight:700;line-height:1.7}
 @media(max-width:600px){.brandbar{padding-top:env(safe-area-inset-top)}.brandwrap{padding:8px 62px 8px 10px!important}.brand{gap:10px}.brandmark{width:52px;height:52px;flex-basis:52px}.brandname{font-size:14px}.brand-title{font-size:22px}.brandline{font-size:12px;margin-top:7px;padding-top:6px}.menu-button{right:10px;top:calc(10px + env(safe-area-inset-top))}header{padding:9px 10px 14px}.wrap{padding:10px}form{display:block}.address{width:100%;margin-bottom:8px}.btn{width:100%;height:46px}.card{border-radius:12px;padding:15px;margin:10px 0}.row{grid-template-columns:1fr;gap:2px}.label{font-size:12px}.value{font-size:15px}.loan-grid,.land-price-main{grid-template-columns:1fr}.land-calc-row{display:block}.land-calc button{width:100%;margin-top:8px}.quiz-course-buttons{grid-template-columns:1fr}.quiz{padding:15px}}
 @media print{.brandbar{position:static;background:#fff;color:#123;box-shadow:none}header{background:#fff;color:#123;border-bottom:2px solid #0f4c81}.modebar,form,.location-btn,.tools,.loading-screen{display:none!important}.card{box-shadow:none;break-inside:avoid}.wrap{max-width:none}.notice{color:#4d5964}}
-.menu-button{position:fixed}
+.menu-button{position:fixed;z-index:102}
 </style>
 </head>
 <body>
@@ -1177,7 +1202,7 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <button type="button" class="menu-button" id="menuButton" aria-label="メニューを開く" aria-expanded="false">☰</button>
 <div class="menu-panel" id="menuPanel" aria-hidden="true"><button type="button" data-menu-action="guide">🔰 使い方</button><button type="button" data-menu-action="quiz">🧠 宅建・不動産クイズ</button><button type="button" data-menu-action="notice">📢 お知らせ</button><button type="button" data-menu-action="contact">✉ お問い合わせ</button><button type="button" data-menu-action="manga">📚 不動さんの日常</button></div>
 <header><div class="wrap" style="padding:0">
-<div class="modebar"><a class="mode {% if mode == 'sales' %}active{% endif %}" href="/?mode=sales{% if staff %}&staff={{ staff }}{% endif %}">営業向け</a><a class="mode {% if mode == 'public' %}active{% endif %}" href="/?mode=public{% if staff %}&staff={{ staff }}{% endif %}">一般向け</a><a class="mode {% if mode == 'internal' %}active{% endif %}" href="/?mode=internal{% if staff %}&staff={{ staff }}{% endif %}">プロ向け</a></div>
+<div class="modebar"><a class="mode {% if mode == 'public' %}active{% endif %}" href="/?mode=public{% if staff %}&staff={{ staff }}{% endif %}">防災情報</a><a class="mode {% if mode == 'sales' %}active{% endif %}" href="/?mode=sales{% if staff %}&staff={{ staff }}{% endif %}">アマ向け</a><a class="mode {% if mode == 'internal' %}active{% endif %}" href="/?mode=internal{% if staff %}&staff={{ staff }}{% endif %}">プロ向け</a></div>
 <div class="scope">{{ '全国｜身近な防災確認' if mode == 'public' else ('名古屋圏とその周辺｜詳しい調査画面' if mode == 'internal' else '名古屋圏とその周辺｜営業現場向け') }}</div>
 <div class="scope" style="font-size:11px;opacity:.8">版: {{ build_version }}</div>
 <div class="subtitle">{{ '現在地の災害リスクと近くの避難場所を確認' if mode == 'public' else '土地・建築制限／ハザード／学区／生活情報をまとめて確認' }}</div>
@@ -1190,12 +1215,12 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <button class="btn" type="submit">この住所を調査 <span class="spinner">…</span></button>
 </form>{% else %}<div class="operation-hint">下の「現在地から調査」を押してください</div><form method="get" action="/" id="searchForm"><input type="hidden" name="mode" value="public">{% if staff %}<input type="hidden" name="staff" value="{{ staff }}">{% endif %}</form>{% endif %}<button class="location-btn" type="button" id="locationBtn">📍 現在地から調査</button></div></header>
 <main class="wrap">
-<details class="card quick-guide" id="quickGuide"><summary>🔰 はじめて使う方へ　<span style="font-size:12px;font-weight:500">（押すと使い方が開きます）</span></summary><ol class="guide-steps"><li>上の「営業向け・一般向け・プロ向け」から、使い方を選びます。</li>{% if mode != 'public' %}<li>調べたい土地の住所を入力します。</li><li>「この住所を調査」を押します。</li>{% else %}<li>「現在地から調査」を押し、位置情報の利用を許可します。</li>{% endif %}<li>調査中のミニクイズに答えながら待ちます。</li><li>結果が出たら、画面を下へ動かして確認します。</li></ol><div class="guide-hint">{% if mode == 'public' %}住所入力は不要です。今いる場所で「現在地から調査」を押してください。{% else %}住所は「市区町村・町名・番地」まで入力すると、場所を特定しやすくなります。{% endif %}<br>※最初に黒い画面が表示されても故障ではありません。サーバーの準備中ですので、画面を閉じずに30秒～1分ほどそのままお待ちください。</div></details>
+<details class="card quick-guide" id="quickGuide"><summary>🔰 はじめて使う方へ　<span style="font-size:12px;font-weight:500">（押すと使い方が開きます）</span></summary><ol class="guide-steps"><li>上の「アマ向け・防災情報・プロ向け」から、使い方を選びます。</li>{% if mode != 'public' %}<li>調べたい土地の住所を入力します。</li><li>「この住所を調査」を押します。</li>{% else %}<li>「現在地から調査」を押し、位置情報の利用を許可します。</li>{% endif %}<li>調査中のミニクイズに答えながら待ちます。</li><li>結果が出たら、画面を下へ動かして確認します。</li></ol><div class="guide-hint">{% if mode == 'public' %}住所入力は不要です。今いる場所で「現在地から調査」を押してください。{% else %}住所は「市区町村・町名・番地」まで入力すると、場所を特定しやすくなります。{% endif %}<br>※最初に黒い画面が表示されても故障ではありません。サーバーの準備中ですので、画面を閉じずに30秒～1分ほどそのままお待ちください。</div></details>
 {% if error %}<div class="error">{{ error }}</div>{% endif %}
 {% if mode == 'public' and not r and not error %}<div class="card"><h2>🛡 今いる場所の防災情報</h2><div class="desc">「現在地から調査」を押すと、その場所のハザード情報と近くの指定緊急避難場所を確認できます。</div><div class="notice" style="margin-top:10px">※端末の位置情報にはずれが生じることがあります。表示された場所が現在地と合っているか確認してください。</div></div>{% endif %}
 {% if r %}
 {% if mode == 'internal' %}<div class="tools"><button class="toolbtn" type="button" onclick="window.print()">🖨 調査結果を印刷</button></div>{% endif %}
-<div class="card"><h2>📍 物件調査結果</h2><div class="row"><div class="label">所在地</div><div class="value">{{ r.address }}</div></div>{% if r.is_current_location %}<div class="notice" style="margin-top:8px">※端末の位置情報をもとにした推定住所です。実際の場所とずれる場合があります。</div>{% endif %}{% if mode == 'internal' %}<div class="row"><div class="label">調査日時</div><div class="value">{{ r.searched_at }}</div></div>{% endif %}</div>
+<div class="card"><h2>📍 物件調査結果</h2><div class="row"><div class="label">所在地</div><div class="value">{{ r.address }}</div></div>{% if r.is_current_location %}<div class="notice" style="margin-top:8px">※端末の位置情報をもとにした推定住所です。実際の場所とずれる場合があります。</div>{% endif %}{% if r.geocode_note %}<div class="notice" style="margin-top:8px;color:#8c2b20">※{{ r.geocode_note }}</div>{% endif %}{% if mode == 'internal' %}<div class="row"><div class="label">調査日時</div><div class="value">{{ r.searched_at }}</div></div>{% endif %}</div>
 {% if mode != 'public' %}<div class="card"><h2>🏠 土地・建築情報</h2>
 <div class="row"><div class="label">区域区分</div><div class="value">{{ r.area_names|join(' / ') }}</div></div>
 <h3>区域区分について</h3><div class="desc">{{ r.area_explanation }}</div>
@@ -1273,12 +1298,13 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 <footer>東海三県（愛知・岐阜・三重）の営業利用を優先して整備中です。<br>コンビニ・スーパー：Geoapify Places API ／ ドラッグストア：Yahoo!ローカルサーチAPI ／ 駅：HeartRails Express<br>徒歩経路：OpenStreetMap道路データを利用する公開ルートサービス（取得不可時は概算）<br>© OpenStreetMap contributors　／　Web Services by Yahoo! JAPAN<br>Developed by J. Toriuchi</footer>
 </main>
 <div class="modal-backdrop" id="infoModal" aria-hidden="true"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle"><div class="modal-head"><h2 id="infoModalTitle"></h2><button type="button" class="modal-close" data-close-modal aria-label="閉じる">×</button></div><div id="infoModalContent" class="desc"></div></div></div>
-<div class="modal-backdrop" id="quizModal" aria-hidden="true"><div class="modal quiz-modal" role="dialog" aria-modal="true" aria-labelledby="menuQuizTitle"><div class="modal-head"><h2 id="menuQuizTitle">🧠 宅建・不動産クイズ</h2><button type="button" class="modal-close" data-close-modal aria-label="閉じる">×</button></div><div class="quiz-course-buttons"><button type="button" data-quiz-course="public">防災・一般</button><button type="button" data-quiz-course="sales">営業向け</button><button type="button" data-quiz-course="internal">プロ・激むず</button></div><div class="quiz-label" id="menuQuizLabel"></div><div class="quiz-question" id="menuQuizQuestion"></div><div class="quiz-options" id="menuQuizOptions"></div><div class="quiz-answer" id="menuQuizAnswer"></div><button type="button" class="quiz-next" id="menuQuizNext">次のクイズへ</button></div></div>
+<div class="modal-backdrop" id="quizModal" aria-hidden="true"><div class="modal quiz-modal" role="dialog" aria-modal="true" aria-labelledby="menuQuizTitle"><div class="modal-head"><h2 id="menuQuizTitle">🧠 宅建・不動産クイズ</h2><button type="button" class="modal-close" data-close-modal aria-label="閉じる">×</button></div><div class="quiz-course-buttons"><button type="button" data-quiz-course="public">防災・一般</button><button type="button" data-quiz-course="sales">アマ向け</button><button type="button" data-quiz-course="internal">プロ・激むず</button></div><div class="quiz-label" id="menuQuizLabel"></div><div class="quiz-question" id="menuQuizQuestion"></div><div class="quiz-options" id="menuQuizOptions"></div><div class="quiz-answer" id="menuQuizAnswer"></div><button type="button" class="quiz-next" id="menuQuizNext">次のクイズへ</button></div></div>
 <div class="loading-screen" id="loadingScreen"><div class="loading-panel"><div class="loader-logo">不動さんの<br>らくらく物件調査</div><div style="margin-top:10px">物件情報を調査しています。<br>そのまま少々お待ちください。</div><div class="quiz" id="quizBox"><div class="quiz-label" id="quizLabel"></div><div class="quiz-question" id="quizQuestion"></div><div class="quiz-options" id="quizOptions"></div><div class="quiz-answer" id="quizAnswer"></div><button type="button" class="quiz-next" id="quizNext">次のクイズへ</button></div></div></div>
 <script>
 const currentMode={{ mode|tojson }};
-const quickGuide=document.getElementById('quickGuide');
-if(quickGuide){try{if(!localStorage.getItem('fudoSurveyGuideSeen'))quickGuide.open=true;quickGuide.addEventListener('toggle',function(){if(quickGuide.open)localStorage.setItem('fudoSurveyGuideSeen','1')})}catch(e){quickGuide.open=true}}
+let quickGuide=document.getElementById('quickGuide');
+function initQuickGuide(){if(quickGuide){try{if(!localStorage.getItem('fudoSurveyGuideSeen'))quickGuide.open=true;quickGuide.addEventListener('toggle',function(){if(quickGuide.open)localStorage.setItem('fudoSurveyGuideSeen','1')})}catch(e){quickGuide.open=true}}}
+initQuickGuide();
 const quizSets={
 public:{label:'不動さんの防災ミニクイズ',items:[
 {q:'大雨のとき、川の様子を見に行ってもよい？',options:['見に行かない','短時間なら見に行く'],correct:0,explanation:'正解は「見に行かない」です。川や水路には近づかず、自治体の情報を確認しましょう。'},
@@ -1408,7 +1434,26 @@ externalInternalQuestions.forEach(function(item){
 });
 const quizQueues={};
 function refillQuizQueue(mode,count){const queue=Array.from({length:count},function(_,i){return i});for(let i=queue.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=queue[i];queue[i]=queue[j];queue[j]=t}quizQueues[mode]=queue;}
-function openFetchedPage(html,url){window.history.replaceState(null,'',url);document.open();document.write(html);document.close();}
+function openFetchedPage(html,url){
+  const fetched=new DOMParser().parseFromString(html,'text/html');
+  const newMain=fetched.querySelector('main.wrap');
+  const oldMain=document.querySelector('main.wrap');
+  if(!newMain||!oldMain)throw new Error('調査結果の表示に失敗しました');
+  oldMain.replaceWith(newMain);
+  quickGuide=document.getElementById('quickGuide');
+  initQuickGuide();
+  bindResultCalculators();
+  window.history.replaceState(null,'',url);
+  document.title=fetched.title;
+  document.getElementById('loadingScreen').classList.remove('show');
+  const form=document.getElementById('searchForm');
+  form.classList.remove('loading');
+  const submitBtn=form.querySelector('.btn');
+  if(submitBtn)submitBtn.disabled=false;
+  const locationBtn=document.getElementById('locationBtn');
+  if(locationBtn){locationBtn.disabled=false;locationBtn.textContent='📍 現在地から調査';}
+  window.scrollTo(0,0);
+}
 function prepareQuiz(){const mode=quizSets[currentMode]?currentMode:'sales';const set=quizSets[mode];if(!quizQueues[mode]||!quizQueues[mode].length)refillQuizQueue(mode,set.items.length);const item=set.items[quizQueues[mode].pop()];document.getElementById('quizLabel').textContent=set.label;document.getElementById('quizQuestion').textContent=item.q;const options=document.getElementById('quizOptions');const answer=document.getElementById('quizAnswer');const next=document.getElementById('quizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,optionIndex){const button=document.createElement('button');button.type='button';button.className='quiz-option';button.textContent=(item.options.length===4?(optionIndex+1)+'．':'')+label;button.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(b){b.disabled=true});answer.textContent=(optionIndex===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(button)});}
 document.getElementById('quizNext').addEventListener('click',prepareQuiz);
 function showLoading(){prepareQuiz();document.getElementById('loadingScreen').classList.add('show');}
@@ -1416,10 +1461,16 @@ function runSearch(form){form.classList.add('loading');const submitBtn=form.quer
 document.getElementById('searchForm').addEventListener('submit',function(event){event.preventDefault();runSearch(this);});
 document.getElementById('locationBtn').addEventListener('click',function(){const btn=this;btn.disabled=true;btn.textContent='現在地を確認しています…';if(!navigator.geolocation){alert('この端末では現在地を取得できません。');btn.disabled=false;return}navigator.geolocation.getCurrentPosition(function(pos){const form=document.getElementById('searchForm');['lat','lon'].forEach(function(name){let el=form.querySelector('input[name="'+name+'"]');if(!el){el=document.createElement('input');el.type='hidden';el.name=name;form.appendChild(el)}el.value=name==='lat'?pos.coords.latitude:pos.coords.longitude});const addressInput=form.querySelector('.address');if(addressInput)addressInput.required=false;runSearch(form);},function(){alert('現在地を取得できませんでした。位置情報の利用を許可してください。');btn.disabled=false;btn.textContent='📍 現在地から調査';},{enableHighAccuracy:true,timeout:10000});});
 function calcLoan(){const amountEl=document.getElementById('loanAmount');if(!amountEl)return;const resultEl=document.getElementById('loanResult'),a=Number(amountEl.value)*10000,b=Number(document.getElementById('loanBonus').value)*10000,y=Number(document.getElementById('loanYears').value),rate=Number(document.getElementById('loanRate').value)/1200,n=y*12;if(!a||!y){resultEl.textContent='借入金額と返済期間を入力してください。';return}let bonusPV=0;for(let month=6;month<=n;month+=6){bonusPV+=b/Math.pow(1+rate,month)}if(bonusPV>=a){resultEl.textContent='ボーナス返済額が大きすぎます。金額を小さくしてください。';return}const monthlyPrincipal=a-bonusPV,pay=rate?monthlyPrincipal*rate*Math.pow(1+rate,n)/(Math.pow(1+rate,n)-1):monthlyPrincipal/n,total=pay*n+b*Math.floor(n/6),bonusMonth=pay+b;resultEl.innerHTML='毎月返済額　約 '+Math.round(pay).toLocaleString()+'円<br>ボーナス時返済額　約 '+Math.round(bonusMonth).toLocaleString()+'円 <span style="font-weight:400;font-size:12px">（年2回）</span><br>返済総額　約 '+Math.round(total).toLocaleString()+'円';}
-['loanAmount','loanRate','loanYears','loanBonus'].forEach(function(id){const el=document.getElementById(id);if(el){el.addEventListener('input',calcLoan);el.addEventListener('change',calcLoan)}});const loanCalcButton=document.getElementById('loanCalcButton');if(loanCalcButton)loanCalcButton.addEventListener('click',calcLoan);calcLoan();
-const landCalc=document.querySelector('.land-calc');
-function calcLandPrice(){if(!landCalc)return;const area=Number(document.getElementById('landArea').value),result=document.getElementById('landPriceResult');if(!area||area<=0){result.textContent='土地面積を入力してください。';return}const center=area*Number(landCalc.dataset.price),low=area*Number(landCalc.dataset.low),high=area*Number(landCalc.dataset.high),tsubo=area/3.305785;const man=function(yen){return Math.round(yen/10000).toLocaleString()+'万円'};result.innerHTML='面積　約 '+tsubo.toFixed(1)+'坪<br>目安価格　約 '+man(center)+'<br><span style="font-weight:400;font-size:12px">参考範囲：約 '+man(low)+' ～ '+man(high)+'</span>';}
-if(landCalc){document.getElementById('landCalcButton').addEventListener('click',calcLandPrice);document.getElementById('landArea').addEventListener('input',calcLandPrice)}
+function calcLandPrice(){const landCalc=document.querySelector('.land-calc');if(!landCalc)return;const area=Number(document.getElementById('landArea').value),result=document.getElementById('landPriceResult');if(!area||area<=0){result.textContent='土地面積を入力してください。';return}const center=area*Number(landCalc.dataset.price),low=area*Number(landCalc.dataset.low),high=area*Number(landCalc.dataset.high),tsubo=area/3.305785;const man=function(yen){return Math.round(yen/10000).toLocaleString()+'万円'};result.innerHTML='面積　約 '+tsubo.toFixed(1)+'坪<br>目安価格　約 '+man(center)+'<br><span style="font-weight:400;font-size:12px">参考範囲：約 '+man(low)+' ～ '+man(high)+'</span>';}
+function bindResultCalculators(){
+  calcLoan();
+}
+bindResultCalculators();
+document.addEventListener('input',function(event){if(['loanAmount','loanRate','loanYears','loanBonus'].includes(event.target.id))calcLoan()});
+document.addEventListener('change',function(event){if(['loanAmount','loanRate','loanYears','loanBonus'].includes(event.target.id))calcLoan()});
+document.addEventListener('click',function(event){if(event.target.closest('#loanCalcButton'))calcLoan()});
+document.addEventListener('input',function(event){if(event.target.id==='landArea')calcLandPrice()});
+document.addEventListener('click',function(event){if(event.target.closest('#landCalcButton'))calcLandPrice()});
 const menuButton=document.getElementById('menuButton'),menuPanel=document.getElementById('menuPanel'),infoModal=document.getElementById('infoModal'),quizModal=document.getElementById('quizModal');
 function closeMenu(){menuPanel.classList.remove('show');menuPanel.setAttribute('aria-hidden','true');menuButton.setAttribute('aria-expanded','false')}
 function openModal(modal){closeMenu();modal.classList.add('show');modal.setAttribute('aria-hidden','false')}
@@ -1429,7 +1480,7 @@ document.addEventListener('click',function(event){if(!menuPanel.contains(event.t
 document.querySelectorAll('[data-close-modal]').forEach(function(button){button.addEventListener('click',function(){closeModal(button.closest('.modal-backdrop'))})});
 document.querySelectorAll('.modal-backdrop').forEach(function(backdrop){backdrop.addEventListener('click',function(event){if(event.target===backdrop)closeModal(backdrop)})});
 function showInfo(title,html){document.getElementById('infoModalTitle').textContent=title;document.getElementById('infoModalContent').innerHTML=html;openModal(infoModal)}
-document.querySelectorAll('[data-menu-action]').forEach(function(button){button.addEventListener('click',function(){const action=button.dataset.menuAction;if(action==='guide'){closeMenu();quickGuide.open=true;quickGuide.scrollIntoView({behavior:'smooth',block:'start'})}else if(action==='quiz'){openModal(quizModal);prepareMenuQuiz()}else if(action==='notice'){showInfo('📢 お知らせ','<b>新しい機能を追加しました。</b><br>メニューからいつでもクイズに挑戦できます。営業向け・プロ向けでは、周辺の土地価格と土地面積からの目安価格も確認できます。')}else if(action==='contact'){showInfo('✉ お問い合わせ','お問い合わせ窓口は準備中です。公開後、この画面からご案内します。')}else{showInfo('📚 不動さんの日常','「不動さんの日常」は準備中です。公開まで少々お待ちください。')}})});
+document.querySelectorAll('[data-menu-action]').forEach(function(button){button.addEventListener('click',function(){const action=button.dataset.menuAction;if(action==='guide'){closeMenu();quickGuide.open=true;quickGuide.scrollIntoView({behavior:'smooth',block:'start'})}else if(action==='quiz'){openModal(quizModal);prepareMenuQuiz()}else if(action==='notice'){showInfo('📢 お知らせ','<b>新しい機能を追加しました。</b><br>メニューからいつでもクイズに挑戦できます。アマ向け・プロ向けでは、周辺の土地価格と土地面積からの目安価格も確認できます。')}else if(action==='contact'){showInfo('✉ お問い合わせ','お問い合わせ窓口は準備中です。公開後、この画面からご案内します。')}else{showInfo('📚 不動さんの日常','「不動さんの日常」は準備中です。公開まで少々お待ちください。')}})});
 let menuQuizMode=quizSets[currentMode]?currentMode:'sales';const menuQuizQueues={};
 function prepareMenuQuiz(){const set=quizSets[menuQuizMode];if(!menuQuizQueues[menuQuizMode]||!menuQuizQueues[menuQuizMode].length){const q=Array.from({length:set.items.length},function(_,i){return i});for(let i=q.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=q[i];q[i]=q[j];q[j]=t}menuQuizQueues[menuQuizMode]=q}const item=set.items[menuQuizQueues[menuQuizMode].pop()];document.querySelectorAll('[data-quiz-course]').forEach(function(b){b.classList.toggle('active',b.dataset.quizCourse===menuQuizMode)});document.getElementById('menuQuizLabel').textContent=set.label;document.getElementById('menuQuizQuestion').textContent=item.q;const options=document.getElementById('menuQuizOptions'),answer=document.getElementById('menuQuizAnswer'),next=document.getElementById('menuQuizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,index){const b=document.createElement('button');b.type='button';b.className='quiz-option';b.textContent=(item.options.length===4?(index+1)+'．':'')+label;b.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(x){x.disabled=true});answer.textContent=(index===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(b)})}
 document.querySelectorAll('[data-quiz-course]').forEach(function(button){button.addEventListener('click',function(){menuQuizMode=button.dataset.quizCourse;prepareMenuQuiz()})});document.getElementById('menuQuizNext').addEventListener('click',prepareMenuQuiz);
@@ -1442,7 +1493,7 @@ def index():
     address=(request.args.get("address") or "").strip()
     current_lat=request.args.get("lat")
     current_lon=request.args.get("lon")
-    mode=(request.args.get("mode") or "sales").strip()
+    mode=(request.args.get("mode") or "public").strip()
     if mode not in ("sales","public","internal"): mode="sales"
     staff=(request.args.get("staff") or "").strip().lower()
     if staff not in tuple("id%02d" % number for number in range(1, 13)): staff=""
