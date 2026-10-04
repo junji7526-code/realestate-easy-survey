@@ -1199,6 +1199,8 @@ form{display:flex;gap:8px}.address{flex:1;padding:13px 14px;border:0;border-radi
 .rental-guide p{margin:14px 0}.rental-guide h3{font-size:17px;color:var(--accent);margin:22px 0 12px}.rental-line-button{display:block;background:#06c755;color:#fff;text-align:center;text-decoration:none;font-size:18px;font-weight:800;line-height:1.5;padding:16px 12px;border-radius:10px;margin:18px 0}.rental-line-button:focus-visible{outline:3px solid var(--accent);outline-offset:3px}.rental-qr{text-align:center;margin:14px 0}.rental-qr img{display:block;width:180px;max-width:100%;height:auto;margin:0 auto}
 
 .rental-guide .rental-company{font-size:13px;color:var(--muted);line-height:1.7;border-top:1px solid #e8eef3;padding-top:12px;margin-top:20px}
+
+.contact-form label{display:block;margin:14px 0;font-weight:700}.contact-form input,.contact-form select,.contact-form textarea{display:block;box-sizing:border-box;width:100%;min-width:0;margin-top:6px;padding:12px;border:1px solid #cbd8e2;border-radius:8px;font-size:16px;font-family:inherit;background:#fff;color:var(--ink)}.contact-form textarea{resize:vertical}.contact-form button{box-sizing:border-box;width:100%;padding:14px;border:0;border-radius:9px;background:var(--accent2);color:#fff;font-size:16px;font-weight:800;cursor:pointer}.contact-form button:disabled{opacity:.6;cursor:default}.contact-form .contact-trap{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}.contact-note{font-size:13px;font-weight:400}.contact-form #contactStatus{overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -1484,13 +1486,171 @@ document.addEventListener('click',function(event){if(!menuPanel.contains(event.t
 document.querySelectorAll('[data-close-modal]').forEach(function(button){button.addEventListener('click',function(){closeModal(button.closest('.modal-backdrop'))})});
 document.querySelectorAll('.modal-backdrop').forEach(function(backdrop){backdrop.addEventListener('click',function(event){if(event.target===backdrop)closeModal(backdrop)})});
 function showInfo(title,html){document.getElementById('infoModalTitle').textContent=title;document.getElementById('infoModalContent').innerHTML=html;openModal(infoModal)}
-document.querySelectorAll('[data-menu-action]').forEach(function(button){button.addEventListener('click',function(){const action=button.dataset.menuAction;if(action==='guide'){closeMenu();quickGuide.open=true;quickGuide.scrollIntoView({behavior:'smooth',block:'start'})}else if(action==='quiz'){openModal(quizModal);prepareMenuQuiz()}else if(action==='notice'){showInfo('📢 お知らせ','<b>新しい機能を追加しました。</b><br>メニューからいつでもクイズに挑戦できます。アマ向け・プロ向けでは、周辺の土地価格と土地面積からの目安価格も確認できます。')}else if(action==='rental'){showInfo('賃貸のかりすま',"<div class=\"rental-guide\"><p><strong>あなたに合ったお部屋探し、お手伝いします。</strong></p><p>「賃貸のかりすま」は、たくさんの物件の中からお客様のご希望をお聞きして、<strong>一緒にぴったりのお部屋を探していく賃貸仲介サービス</strong>です。</p><p>「駅近」「家賃」「通勤」「ペット」など、そんなご希望もお気軽にお聞かせください。</p><p><strong>お部屋探しのコンシェルジュとして、物件探しから内見・お申込み・ご契約・ご入居までサポートします。</strong></p><h3>まずはLINEでお気軽にご相談ください</h3><p>「こんな条件の部屋ありますか？」<br>というご相談だけでも大丈夫です。</p><a class=\"rental-line-button\" href=\"https://lin.ee/UJBulW0\" target=\"_blank\" rel=\"noopener noreferrer\">LINEで相談する</a><p class=\"rental-company\">運営会社：株式会社エルスタット<br>宅地建物取引業免許：愛知県知事（1）第25598号</p></div>")}else if(action==='contact'){showInfo('✉ お問い合わせ','お問い合わせ窓口は準備中です。公開後、この画面からご案内します。')}else{showInfo('📚 不動さんの日常','「不動さんの日常」は準備中です。公開まで少々お待ちください。')}})});
+const contactFormHtml = '<form id="contactForm" class="contact-form"><label>お名前【必須】<input name="name" autocomplete="name" maxlength="100" required></label><label>メールアドレス【必須】<input name="email" type="email" autocomplete="email" maxlength="254" required></label><label>電話番号【任意】<input name="phone" type="tel" autocomplete="tel" maxlength="40"></label><label>お問い合わせ種別【必須】<select name="kind" required><option value="">選択してください</option><option>らくらく物件調査について</option><option>不動産について</option><option>賃貸について</option><option>その他</option></select></label><label>お問い合わせ内容【必須】<textarea name="message" maxlength="5000" rows="5" required></textarea></label><div class="contact-trap" aria-hidden="true"><label>この欄は入力しないでください<input name="website" tabindex="-1" autocomplete="off"></label></div><p class="contact-note">入力いただいた情報は、お問い合わせへの対応に利用します。</p><button type="submit" id="contactSubmit" disabled>送信する</button><p id="contactStatus" role="status" aria-live="polite"></p></form>';
+let contactDraft=null;
+function openContact(){
+ showInfo('✉ お問い合わせ',contactFormHtml);
+ const form=document.getElementById('contactForm'),button=document.getElementById('contactSubmit'),status=document.getElementById('contactStatus');
+ let token='',busy=false;
+ if(contactDraft)Object.keys(contactDraft).forEach(function(key){if(form.elements[key])form.elements[key].value=contactDraft[key]});
+ function saveDraft(){contactDraft={};['name','email','phone','kind','message'].forEach(function(key){contactDraft[key]=form.elements[key].value})}
+ form.addEventListener('input',saveDraft);
+ async function getToken(){
+  button.disabled=true;
+  try{const response=await fetch('/contact/token',{cache:'no-store',credentials:'same-origin'});const data=await response.json();if(!response.ok||!data.token)throw new Error(data.error||'送信の準備ができませんでした。画面を開き直してください。');token=data.token;await new Promise(function(resolve){setTimeout(resolve,2100)});button.disabled=false}
+  catch(error){status.textContent=error.message}
+ }
+ form.addEventListener('submit',async function(event){
+  event.preventDefault();if(busy||!token||!form.reportValidity())return;
+  busy=true;button.disabled=true;status.textContent='送信中です…';saveDraft();
+  const payload=Object.assign({},contactDraft,{token:token,website:form.elements.website.value});token='';
+  try{const response=await fetch('/contact/send',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const data=await response.json();if(!response.ok)throw new Error(data.error||'送信できませんでした。時間をおいてもう一度お試しください。');status.textContent=data.message;contactDraft=null;form.reset();button.textContent='送信済み';}
+  catch(error){status.textContent=error.message||'送信できませんでした。時間をおいてもう一度お試しください。';busy=false;await getToken()}
+ });
+ getToken();
+}
+
+document.querySelectorAll('[data-menu-action]').forEach(function(button){button.addEventListener('click',function(){const action=button.dataset.menuAction;if(action==='guide'){closeMenu();quickGuide.open=true;quickGuide.scrollIntoView({behavior:'smooth',block:'start'})}else if(action==='quiz'){openModal(quizModal);prepareMenuQuiz()}else if(action==='notice'){showInfo('📢 お知らせ','<b>新しい機能を追加しました。</b><br>メニューからいつでもクイズに挑戦できます。アマ向け・プロ向けでは、周辺の土地価格と土地面積からの目安価格も確認できます。')}else if(action==='rental'){showInfo('賃貸のかりすま',"<div class=\"rental-guide\"><p><strong>あなたに合ったお部屋探し、お手伝いします。</strong></p><p>「賃貸のかりすま」は、たくさんの物件の中からお客様のご希望をお聞きして、<strong>一緒にぴったりのお部屋を探していく賃貸仲介サービス</strong>です。</p><p>「駅近」「家賃」「通勤」「ペット」など、そんなご希望もお気軽にお聞かせください。</p><p><strong>お部屋探しのコンシェルジュとして、物件探しから内見・お申込み・ご契約・ご入居までサポートします。</strong></p><h3>まずはLINEでお気軽にご相談ください</h3><p>「こんな条件の部屋ありますか？」<br>というご相談だけでも大丈夫です。</p><a class=\"rental-line-button\" href=\"https://lin.ee/UJBulW0\" target=\"_blank\" rel=\"noopener noreferrer\">LINEで相談する</a><p class=\"rental-company\">運営会社：株式会社エルスタット<br>宅地建物取引業免許：愛知県知事（1）第25598号</p></div>")}else if(action==='contact'){openContact()}else{showInfo('📚 不動さんの日常','「不動さんの日常」は準備中です。公開まで少々お待ちください。')}})});
 let menuQuizMode=quizSets[currentMode]?currentMode:'sales';const menuQuizQueues={};
 function prepareMenuQuiz(){const set=quizSets[menuQuizMode];if(!menuQuizQueues[menuQuizMode]||!menuQuizQueues[menuQuizMode].length){const q=Array.from({length:set.items.length},function(_,i){return i});for(let i=q.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));const t=q[i];q[i]=q[j];q[j]=t}menuQuizQueues[menuQuizMode]=q}const item=set.items[menuQuizQueues[menuQuizMode].pop()];document.querySelectorAll('[data-quiz-course]').forEach(function(b){b.classList.toggle('active',b.dataset.quizCourse===menuQuizMode)});document.getElementById('menuQuizLabel').textContent=set.label;document.getElementById('menuQuizQuestion').textContent=item.q;const options=document.getElementById('menuQuizOptions'),answer=document.getElementById('menuQuizAnswer'),next=document.getElementById('menuQuizNext');options.innerHTML='';answer.textContent='';answer.classList.remove('show');next.classList.remove('show');item.options.forEach(function(label,index){const b=document.createElement('button');b.type='button';b.className='quiz-option';b.textContent=(item.options.length===4?(index+1)+'．':'')+label;b.addEventListener('click',function(){options.querySelectorAll('button').forEach(function(x){x.disabled=true});answer.textContent=(index===item.correct?'〇 正解です。 ':'△ 惜しいです。 ')+item.explanation;answer.classList.add('show');next.classList.add('show')});options.appendChild(b)})}
 document.querySelectorAll('[data-quiz-course]').forEach(function(button){button.addEventListener('click',function(){menuQuizMode=button.dataset.quizCourse;prepareMenuQuiz()})});document.getElementById('menuQuizNext').addEventListener('click',prepareMenuQuiz);
 document.addEventListener('keydown',function(event){if(event.key==='Escape'){closeMenu();document.querySelectorAll('.modal-backdrop.show').forEach(closeModal)}});
 </script>
 </body></html>'''
+
+# Contact-only helpers. Secrets remain on the server.
+import smtplib
+import ssl
+import secrets
+import time
+import hmac
+import hashlib
+from email.message import EmailMessage
+from threading import Lock
+from flask import jsonify
+from urllib.parse import urlsplit
+
+CONTACT_TYPES = ("らくらく物件調査について", "不動産について", "賃貸について", "その他")
+_CONTACT_LOCK = Lock()
+_CONTACT_TOKENS = {}
+_CONTACT_RATES = {}
+
+
+def _contact_limit(bucket, maximum, seconds):
+    now = time.monotonic()
+    with _CONTACT_LOCK:
+        for key in list(_CONTACT_RATES):
+            if not _CONTACT_RATES[key] or now - _CONTACT_RATES[key][-1] > 3600:
+                del _CONTACT_RATES[key]
+        hits = [t for t in _CONTACT_RATES.get(bucket, []) if now-t < seconds]
+        if len(hits) >= maximum or (bucket not in _CONTACT_RATES and len(_CONTACT_RATES) >= 5000):
+            return False
+        _CONTACT_RATES[bucket] = hits + [now]
+    return True
+
+
+def _contact_key():
+    password = os.environ.get("SMTP_PASSWORD", "")
+    if not password:
+        raise ValueError("Contact not configured")
+    return hashlib.sha256(("atris-contact-token-v1:" + password).encode()).digest()
+
+
+def _contact_signature(payload):
+    return hmac.new(_contact_key(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _contact_valid_email(value):
+    return len(value) <= 254 and bool(re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+", value))
+
+
+@app.route("/contact/token", methods=["GET"])
+def contact_token():
+    if not _contact_limit(("token", request.remote_addr), 30, 60):
+        return jsonify(error="時間をおいてもう一度お試しください。"), 429
+    try:
+        payload = str(int(time.time())) + "." + secrets.token_hex(16)
+        token = payload + "." + _contact_signature(payload)
+    except ValueError:
+        return jsonify(error="お問い合わせの送信は現在準備中です。"), 503
+    response = jsonify(token=token)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/contact/send", methods=["POST"])
+def contact_send():
+    failure = "送信できませんでした。時間をおいてもう一度お試しください。"
+    origin = urlsplit(request.headers.get("Origin", ""))
+    local_http = origin.scheme == "http" and origin.hostname in ("localhost", "127.0.0.1", "::1")
+    if origin.netloc != request.host or (origin.scheme != "https" and not local_http):
+        return jsonify(error=failure), 403
+    if request.content_length is None or request.content_length > 20000 or not request.is_json:
+        return jsonify(error="入力内容が長すぎるか、送信形式が正しくありません。"), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(error=failure), 400
+    token = data.get("token", "")
+    try:
+        if not isinstance(token, str) or len(token) > 160:
+            raise ValueError()
+        stamp, nonce, signature = token.split(".")
+        age = time.time() - int(stamp)
+        if not 2 <= age <= 3600 or not re.fullmatch(r"[0-9a-f]{32}", nonce) or not hmac.compare_digest(signature, _contact_signature(stamp+"."+nonce)):
+            raise ValueError()
+    except (ValueError, TypeError):
+        return jsonify(error="画面を開き直して、もう一度お試しください。"), 400
+    if data.get("website"):
+        return jsonify(error=failure), 400
+    fields = {}
+    for key, limit in (("name",100),("email",254),("phone",40),("kind",40),("message",5000)):
+        value = data.get(key, "")
+        if not isinstance(value, str) or len(value) > limit or "\x00" in value:
+            return jsonify(error="入力内容や文字数をご確認ください。"), 400
+        fields[key] = value.strip()
+    if any(not fields[k] for k in ("name","email","kind","message")) or fields["kind"] not in CONTACT_TYPES or not _contact_valid_email(fields["email"]):
+        return jsonify(error="必須項目とメールアドレスをご確認ください。"), 400
+    if any("\r" in fields[k] or "\n" in fields[k] for k in ("name","email","phone","kind")):
+        return jsonify(error="入力内容をご確認ください。"), 400
+    if not _contact_limit(("send",request.remote_addr), 5, 600):
+        return jsonify(error="送信回数が多いため、しばらくお待ちください。"), 429
+    now = time.time()
+    with _CONTACT_LOCK:
+        for key in list(_CONTACT_TOKENS):
+            if now - _CONTACT_TOKENS[key] > 3600:
+                del _CONTACT_TOKENS[key]
+        if token in _CONTACT_TOKENS or len(_CONTACT_TOKENS) >= 5000:
+            return jsonify(error="この送信は受付済みです。画面を開き直してください。"), 409
+        _CONTACT_TOKENS[token] = now
+    try:
+        host = os.environ.get("SMTP_HOST", "").strip()
+        port = int(os.environ.get("SMTP_PORT", "0"))
+        username = os.environ.get("SMTP_USERNAME", "").strip()
+        password = os.environ.get("SMTP_PASSWORD", "")
+        sender = os.environ.get("CONTACT_FROM_EMAIL", "").strip()
+        recipient = os.environ.get("CONTACT_TO_EMAIL", "").strip()
+        if not host or port != 587 or not username or not password or not _contact_valid_email(sender) or not _contact_valid_email(recipient):
+            raise ValueError("Contact not configured")
+        sent_at = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M:%S（日本時間）")
+        mail = EmailMessage()
+        mail["From"] = sender
+        mail["To"] = recipient
+        mail["Reply-To"] = fields["email"]
+        mail["Subject"] = "【らくらく物件調査】お問い合わせ：" + fields["kind"]
+        mail.set_content("\n".join(["不動さんのらくらく物件調査からのお問い合わせ", "", "送信日時："+sent_at, "お名前："+fields["name"], "メールアドレス："+fields["email"], "電話番号："+(fields["phone"] or "未入力"), "お問い合わせ種別："+fields["kind"], "", "お問い合わせ内容：", fields["message"]]))
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            smtp.ehlo()
+            smtp.starttls(context=ssl.create_default_context())
+            smtp.ehlo()
+            smtp.login(username, password)
+            if smtp.send_message(mail):
+                raise RuntimeError("Recipient refused")
+    except Exception:
+        # Do not log exception text: SMTP responses may contain personal data.
+        app.logger.warning("Contact SMTP delivery failed")
+        return jsonify(error=failure), 502
+    return jsonify(message="お問い合わせを送信しました。ありがとうございます。")
+
 
 @app.route("/")
 def index():
