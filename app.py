@@ -1622,6 +1622,7 @@ def contact_send():
         if token in _CONTACT_TOKENS or len(_CONTACT_TOKENS) >= 5000:
             return jsonify(error="この送信は受付済みです。画面を開き直してください。"), 409
         _CONTACT_TOKENS[token] = now
+    smtp_stage = "configuration"
     try:
         host = os.environ.get("SMTP_HOST", "").strip()
         port = int(os.environ.get("SMTP_PORT", "0"))
@@ -1629,7 +1630,7 @@ def contact_send():
         password = os.environ.get("SMTP_PASSWORD", "")
         sender = os.environ.get("CONTACT_FROM_EMAIL", "").strip()
         recipient = os.environ.get("CONTACT_TO_EMAIL", "").strip()
-        if not host or port != 587 or not username or not password or not _contact_valid_email(sender) or not _contact_valid_email(recipient):
+        if not host or port != 465 or not username or not password or not _contact_valid_email(sender) or not _contact_valid_email(recipient):
             raise ValueError("Contact not configured")
         sent_at = datetime.now(timezone(timedelta(hours=9))).strftime("%Y年%m月%d日 %H:%M:%S（日本時間）")
         mail = EmailMessage()
@@ -1638,18 +1639,51 @@ def contact_send():
         mail["Reply-To"] = fields["email"]
         mail["Subject"] = "【らくらく物件調査】お問い合わせ：" + fields["kind"]
         mail.set_content("\n".join(["不動さんのらくらく物件調査からのお問い合わせ", "", "送信日時："+sent_at, "お名前："+fields["name"], "メールアドレス："+fields["email"], "電話番号："+(fields["phone"] or "未入力"), "お問い合わせ種別："+fields["kind"], "", "お問い合わせ内容：", fields["message"]]))
-        with smtplib.SMTP(host, port, timeout=15) as smtp:
+        smtp_stage = "connection"
+        with smtplib.SMTP_SSL(host, port, timeout=15, context=ssl.create_default_context()) as smtp:
+            smtp_stage = "ehlo"
             smtp.ehlo()
-            smtp.starttls(context=ssl.create_default_context())
-            smtp.ehlo()
+            smtp_stage = "authentication"
             smtp.login(username, password)
+            smtp_stage = "send"
             if smtp.send_message(mail):
                 raise RuntimeError("Recipient refused")
-    except Exception:
-        # Do not log exception text: SMTP responses may contain personal data.
-        app.logger.warning("Contact SMTP delivery failed")
+            smtp_stage = "disconnect"
+    except Exception as exc:
+        # Log only fixed categories and a numeric SMTP status, never exception text.
+        if smtp_stage == "connection" and isinstance(exc, ssl.SSLError):
+            smtp_stage = "ssl_tls"
+        elif smtp_stage == "connection" and isinstance(exc, TimeoutError):
+            # SMTP_SSL performs both TCP connection and TLS handshake internally.
+            smtp_stage = "connection_or_ssl_tls"
+        if isinstance(exc, smtplib.SMTPAuthenticationError):
+            error_kind = "authentication_error"
+        elif isinstance(exc, ssl.SSLCertVerificationError):
+            error_kind = "certificate_error"
+        elif isinstance(exc, ssl.SSLError):
+            error_kind = "tls_error"
+        elif isinstance(exc, TimeoutError):
+            error_kind = "timeout"
+        elif isinstance(exc, smtplib.SMTPRecipientsRefused):
+            error_kind = "recipient_refused"
+        elif isinstance(exc, smtplib.SMTPNotSupportedError):
+            error_kind = "smtp_not_supported"
+        elif isinstance(exc, smtplib.SMTPResponseException):
+            error_kind = "smtp_response_error"
+        elif isinstance(exc, smtplib.SMTPServerDisconnected):
+            error_kind = "server_disconnected"
+        elif isinstance(exc, OSError):
+            error_kind = "network_error"
+        elif smtp_stage == "configuration":
+            error_kind = "configuration_error"
+        else:
+            error_kind = "other_error"
+        smtp_code = getattr(exc, "smtp_code", None)
+        safe_code = smtp_code if type(smtp_code) is int and 100 <= smtp_code <= 599 else "none"
+        app.logger.warning("Contact SMTP delivery failed stage=%s error=%s smtp_code=%s", smtp_stage, error_kind, safe_code)
         return jsonify(error=failure), 502
     return jsonify(message="お問い合わせを送信しました。ありがとうございます。")
+
 
 
 @app.route("/")
