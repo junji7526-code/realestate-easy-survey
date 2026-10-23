@@ -2,7 +2,7 @@ services:
   - type: web
     name: realestate-easy-survey
     runtime: python
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     autoDeployTrigger: off
